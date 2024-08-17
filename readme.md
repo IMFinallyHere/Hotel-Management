@@ -9,10 +9,10 @@ After doing a lot of reserch I couldn't find a hotel management software for my 
     - room prices can be defined datewise in *RoomsPriceChart*.
     - if room prices are not present in *RoomsPriceChart*, then if will be picked using default price *(defined while creating a room)*.
     - At the time of give room to a customers.
-- Rooms are always given to a group. More info can be found [here](#gc).
+- Rooms are always given to a group. More info can be found [here](#groups-and-customers).
 
 
-## Groups and Customers {#gc}
+## Groups and Customers
 This group concept came into picture to solve one issue. 
 
 Issue:
@@ -21,7 +21,7 @@ Issue:
 |1.|4|101|6:00|12:00|
 |2.|3|101|13:00|20:00|
 
-Now if we see that the same room has been occupied but two different group of people on same date. So to find who stayed with whom on a particular date, I have introduced this group concept.
+Now if we see that the same room has been occupied by two different group of people on same date. So to find who stayed with whom on a particular date, I have introduced this group concept.
 
 This is straigt forward, a group consist of one or more no. customer. Whenever one or more customers want to check-in into a room, always a new group is created and connected with that room on that date and time.
 ## Configuration
