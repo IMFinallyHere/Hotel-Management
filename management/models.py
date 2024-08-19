@@ -1,7 +1,7 @@
 from django.db import models
 
 
-class CounterCodes(models.Model):
+class CountryCodes(models.Model):
     country_name = models.CharField(max_length=100)
     country_code = models.PositiveSmallIntegerField()
 
@@ -15,7 +15,7 @@ class Customers(models.Model):
     ]
     name = models.CharField(max_length=100)
     number = models.CharField(max_length=10, unique=True)
-    country_code = models.ForeignKey(CounterCodes, models.PROTECT)
+    country_code = models.ForeignKey(CountryCodes, models.PROTECT)
     address = models.CharField(max_length=300, null=True)
     pincode = models.CharField(max_length=6, null=True)
     gender = models.CharField(choices=GENDER, max_length=6)
