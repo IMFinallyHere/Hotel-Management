@@ -8,7 +8,7 @@ After doing a lot of reserch I couldn't find a hotel management software for my 
 - Room prices can be determined in 3 ways:
     - room prices can be defined datewise in *RoomsPriceChart*.
     - if room prices are not present in *RoomsPriceChart*, then if will be picked using default price *(defined while creating a room)*.
-    - At the time of give room to a customers.
+    - At the time of giving room to a customers.
 - Rooms are always given to a group. More info can be found [here](#groups-and-customers).
 
 
