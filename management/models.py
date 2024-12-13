@@ -43,7 +43,7 @@ class RoomType(models.Model):
 
 
 class Rooms(models.Model):
-    room_number = models.PositiveSmallIntegerField(unique=True)
+    room_number = models.CharField(unique=True, max_length=10)
     room_type = models.ForeignKey(RoomType, models.CASCADE, 'rooms')
     beds = models.PositiveSmallIntegerField()
     price = models.DecimalField(max_digits=7, decimal_places=0)  # default price
@@ -59,10 +59,10 @@ class RoomStayLogs(models.Model):
     room = models.ForeignKey(Rooms, models.CASCADE, 'logs')
     check_in = models.DateTimeField(auto_now_add=True)
     check_out = models.DateTimeField(null=True)
-    price = models.DecimalField(max_digits=7, decimal_places=0)
+    price = models.DecimalField(max_digits=7, decimal_places=0, default=0)
     group = models.ForeignKey(Group, models.PROTECT, 'logs')
     extra_bed = models.PositiveSmallIntegerField(default=0)
-    extra_per_bed_price = models.DecimalField(max_digits=7, decimal_places=0)
+    extra_per_bed_price = models.DecimalField(max_digits=7, decimal_places=0, default=0)
 
 
 class Configurations(models.Model):
