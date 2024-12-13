@@ -1,4 +1,12 @@
 from django.db import models
+from django.core.validators import FileExtensionValidator
+from rest_framework.exceptions import ValidationError
+
+
+def validate_file_size(file):
+    max_size_mb = 10
+    if file.size > max_size_mb * 1024 * 1024:
+        raise ValidationError({"non_field_errors": [f"File size must be under {max_size_mb}MB"]})
 
 
 class CountryCodes(models.Model):
@@ -19,8 +27,8 @@ class Customers(models.Model):
     address = models.CharField(max_length=300, null=True)
     pincode = models.CharField(max_length=6, null=True)
     gender = models.CharField(choices=GENDER, max_length=6)
-    identity_card_1 = models.FileField(null=True)
-    identity_card_2 = models.FileField(null=True)
+    identity_card_1 = models.FileField(null=True, blank=False, validators=[FileExtensionValidator(allowed_extensions=['pdf', 'jpeg', 'jpg', 'png']), validate_file_size])
+    identity_card_2 = models.FileField(null=True, blank=False, validators=[FileExtensionValidator(allowed_extensions=['pdf', 'jpeg', 'jpg', 'png']), validate_file_size])
     date_of_birth = models.DateField(null=True)
     first_visit = models.DateTimeField(auto_now_add=True)
 
@@ -47,6 +55,12 @@ class Rooms(models.Model):
     room_type = models.ForeignKey(RoomType, models.CASCADE, 'rooms')
     beds = models.PositiveSmallIntegerField()
     price = models.DecimalField(max_digits=7, decimal_places=0)  # default price
+
+    def is_occupied(self) -> bool:
+        if self.logs.filter(check_out=None):
+            return True
+        else:
+            return False
 
 
 class RoomsPriceChart(models.Model):

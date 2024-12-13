@@ -1,7 +1,10 @@
 from rest_framework import generics
-from .models import Rooms, RoomType, CountryCodes, Customers, Configurations
-from .serializers import RoomSerializer, RoomTypeSerializer, CountryCodeSerializer, CustomerSerializer, ConfigurationSerializer
+from rest_framework.views import APIView
+from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, Group, CustomerGroup
+from .serializers import RoomSerializer, RoomTypeSerializer, CountryCodeSerializer, CustomerSerializer, ConfigurationSerializer, CheckinSerializer, GroupCustomerSerializer
 from rest_framework.permissions import DjangoModelPermissions
+from rest_framework.response import Response
+from rest_framework.decorators import api_view, permission_classes
 
 
 class RoomTypeListCreate(generics.ListCreateAPIView):
@@ -62,3 +65,32 @@ class ConfigurationDetail(generics.RetrieveUpdateDestroyAPIView):
     queryset = Configurations.objects.all()
     serializer_class = ConfigurationSerializer
     permission_classes = [DjangoModelPermissions]
+
+
+class Checkin(APIView):
+    permission_classes = [DjangoModelPermissions]
+
+    @staticmethod
+    def get_queryset():
+        return RoomStayLogs.objects.all()
+
+    def post(self, request):
+        serializer = CheckinSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return Response({'success_message': 'Checking Successful.'})
+
+
+@api_view(['POST'])
+@permission_classes([DjangoModelPermissions])
+def group_customer(request):
+    serializer = GroupCustomerSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+
+    g = Group()
+    g.save()
+
+    grouped = [CustomerGroup(customer=i, group=g) for i in serializer.customers]
+    CustomerGroup.objects.bulk_create(grouped)
+
+    return Response({'group_id': g.id})
+
