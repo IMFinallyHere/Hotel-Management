@@ -1,5 +1,7 @@
 from django.db import models
+from django.contrib.auth.models import User
 from django.core.validators import FileExtensionValidator
+from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 
@@ -52,21 +54,21 @@ class RoomType(models.Model):
 
 class Rooms(models.Model):
     room_number = models.CharField(unique=True, max_length=10)
-    room_type = models.ForeignKey(RoomType, models.CASCADE, 'rooms')
+    room_type = models.ForeignKey(RoomType, models.PROTECT, 'rooms')
     beds = models.PositiveSmallIntegerField()
     price = models.DecimalField(max_digits=7, decimal_places=0)  # default price
 
     def is_occupied(self) -> bool:
-        if self.logs.filter(check_out=None):
-            return True
-        else:
-            return False
+        return self.logs.filter(check_out=None).exists()
 
 
 class RoomsPriceChart(models.Model):
     room = models.ForeignKey(Rooms, models.CASCADE, 'price_chart')
     date = models.DateField()
     price = models.DecimalField(max_digits=7, decimal_places=0)
+
+    class Meta:
+        unique_together = [('room', 'date')]
 
 
 class RoomStayLogs(models.Model):
@@ -77,8 +79,98 @@ class RoomStayLogs(models.Model):
     group = models.ForeignKey(Group, models.PROTECT, 'logs')
     extra_bed = models.PositiveSmallIntegerField(default=0)
     extra_per_bed_price = models.DecimalField(max_digits=7, decimal_places=0, default=0)
+    is_nc = models.BooleanField(default=False)
 
 
 class Configurations(models.Model):
-    key = models.CharField(max_length=30)
+    key = models.CharField(max_length=30, unique=True)
     value = models.TextField(null=True)
+
+
+class Reservation(models.Model):
+    room = models.ForeignKey(Rooms, models.CASCADE, 'reservations')
+    group = models.ForeignKey(Group, models.PROTECT, 'reservations')
+    check_in_date = models.DateField()
+    check_out_date = models.DateField()
+    price = models.DecimalField(max_digits=7, decimal_places=0, default=0)
+    created_on = models.DateTimeField(auto_now_add=True)
+
+
+class Amenity(models.Model):
+    CHARGE_TYPES = [('flat', 'Flat'), ('per_night', 'Per Night')]
+    name = models.CharField(max_length=100, unique=True)
+    price = models.DecimalField(max_digits=7, decimal_places=0)
+    charge_type = models.CharField(max_length=10, choices=CHARGE_TYPES, default='flat')
+    created_on = models.DateTimeField(auto_now_add=True)
+
+
+class StayLogAmenity(models.Model):
+    stay_log = models.ForeignKey(RoomStayLogs, models.CASCADE, 'amenities')
+    amenity = models.ForeignKey(Amenity, models.PROTECT, 'usage')
+    quantity = models.PositiveSmallIntegerField(default=1)
+
+
+class ReportPermissions(models.Model):
+    class Meta:
+        managed = False
+        default_permissions = ()
+        permissions = [
+            ('view_revenue_report', 'Can view revenue report'),
+            ('view_occupancy_report', 'Can view occupancy report'),
+            ('view_guest_report', 'Can view guest analytics report'),
+            ('view_today_overview', 'Can view today overview report'),
+            ('view_room_performance_report', 'Can view room performance report'),
+            ('view_reservation_report', 'Can view reservation fulfillment report'),
+            ('view_clv_report', 'Can view customer lifetime value report'),
+            ('view_trends_report', 'Can view seasonal trends report'),
+            ('view_stay_duration_report', 'Can view stay duration report'),
+            ('view_upsell_report', 'Can view extra bed upsell report'),
+            ('view_pipeline_report', 'Can view booking pipeline report'),
+            ('view_pl_report', 'Can view P&L report'),
+            ('view_staff_sales_report', 'Can view staff sales report'),
+            ('view_cash_reconciliation', 'Can view cash reconciliation'),
+            ('view_expense_report', 'Can view expense report'),
+        ]
+
+
+class RoomNCRequest(models.Model):
+    STATUS = [('pending', 'Pending'), ('approved', 'Approved'), ('rejected', 'Rejected')]
+    stay_log = models.ForeignKey(RoomStayLogs, models.CASCADE, 'nc_requests')
+    reason = models.TextField()
+    status = models.CharField(max_length=10, choices=STATUS, default='pending')
+    requested_by = models.ForeignKey(User, models.SET_NULL, null=True, related_name='nc_requests_made')
+    reviewed_by = models.ForeignKey(User, models.SET_NULL, null=True, blank=True, related_name='nc_requests_reviewed')
+    created_on = models.DateTimeField(auto_now_add=True)
+    reviewed_on = models.DateTimeField(null=True, blank=True)
+
+
+class Payment(models.Model):
+    TYPES = [('cash', 'Cash'), ('upi', 'UPI'), ('card', 'Card'), ('other', 'Other')]
+    stay_log = models.ForeignKey(RoomStayLogs, models.CASCADE, 'payments')
+    payment_type = models.CharField(max_length=10, choices=TYPES)
+    amount = models.DecimalField(max_digits=10, decimal_places=0)
+    processed_by = models.ForeignKey(User, models.SET_NULL, null=True, related_name='payments_processed')
+    note = models.CharField(max_length=200, blank=True)
+    created_on = models.DateTimeField(auto_now_add=True)
+
+
+class CashWithdrawal(models.Model):
+    STATUS = [('pending', 'Pending'), ('approved', 'Approved'), ('rejected', 'Rejected')]
+    amount = models.DecimalField(max_digits=10, decimal_places=0)
+    reason = models.TextField()
+    status = models.CharField(max_length=10, choices=STATUS, default='pending')
+    requested_by = models.ForeignKey(User, models.SET_NULL, null=True, related_name='cash_withdrawals')
+    reviewed_by = models.ForeignKey(User, models.SET_NULL, null=True, blank=True, related_name='cash_withdrawals_reviewed')
+    created_on = models.DateTimeField(auto_now_add=True)
+    reviewed_on = models.DateTimeField(null=True, blank=True)
+    date = models.DateField(default=timezone.localdate)
+
+
+class Expense(models.Model):
+    PAYMENT_TYPES = [('cash', 'Cash'), ('upi', 'UPI'), ('card', 'Card'), ('other', 'Other')]
+    description = models.CharField(max_length=200)
+    amount = models.DecimalField(max_digits=10, decimal_places=0)
+    payment_type = models.CharField(max_length=10, choices=PAYMENT_TYPES)
+    recorded_by = models.ForeignKey(User, models.SET_NULL, null=True, related_name='expenses')
+    date = models.DateField(default=timezone.localdate)
+    created_on = models.DateTimeField(auto_now_add=True)

@@ -1,51 +1,252 @@
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 from django.shortcuts import get_object_or_404
-from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs
+from django.utils import timezone
+from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, RoomsPriceChart, Reservation, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense
 
 
 class RoomTypeSerializer(serializers.ModelSerializer):
     class Meta:
         model = RoomType
-        fields = '__all__'
+        fields = ['id', 'name', 'created_on']
 
 
 class RoomSerializer(serializers.ModelSerializer):
     class Meta:
         model = Rooms
-        fields = '__all__'
+        fields = ['id', 'room_number', 'room_type', 'beds', 'price']
 
 
 class CountryCodeSerializer(serializers.ModelSerializer):
     class Meta:
         model = CountryCodes
-        fields = '__all__'
+        fields = ['id', 'country_name', 'country_code']
 
 
 class CustomerSerializer(serializers.ModelSerializer):
     class Meta:
         model = Customers
-        fields = '__all__'
+        fields = ['id', 'name', 'number', 'country_code', 'address', 'pincode', 'gender',
+                  'identity_card_1', 'identity_card_2', 'date_of_birth', 'first_visit']
 
 
 class ConfigurationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Configurations
-        fields = '__all__'
+        fields = ['id', 'key', 'value']
+
+
+class RoomsPriceChartSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RoomsPriceChart
+        fields = ['id', 'room', 'date', 'price']
 
 
 class CheckinSerializer(serializers.ModelSerializer):
     class Meta:
         model = RoomStayLogs
-        fields = ['room', 'price', 'group', 'extra_per_bed_price']
+        fields = ['room', 'price', 'group', 'extra_bed', 'extra_per_bed_price']
+        extra_kwargs = {
+            'price': {'required': False, 'default': 0},
+        }
 
     @staticmethod
-    def validate_room(value: str):
-        room = get_object_or_404(Rooms, value)
+    def validate_room(value):
+        room = get_object_or_404(Rooms, pk=value.pk)
         if room.is_occupied():
             raise ValidationError('Room is already occupied. Please checkout room to occupy it again.')
         return room
 
+    def validate(self, attrs):
+        price = attrs.get('price', 0)
+        if not price:
+            room = attrs['room']
+            today = timezone.localdate()
+            chart_entry = RoomsPriceChart.objects.filter(room=room, date=today).first()
+            attrs['price'] = chart_entry.price if chart_entry else room.price
+        return attrs
+
+
+class StayLogSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RoomStayLogs
+        fields = ['id', 'room', 'group', 'check_in', 'check_out', 'price', 'extra_bed', 'extra_per_bed_price', 'is_nc']
+
+
+class StayLogUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RoomStayLogs
+        fields = ['extra_bed', 'extra_per_bed_price']
+
 
 class GroupCustomerSerializer(serializers.Serializer):
     customers = serializers.ListSerializer(child=serializers.PrimaryKeyRelatedField(queryset=Customers.objects.all()), required=True, allow_null=False, allow_empty=False)
+
+
+class ReservationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Reservation
+        fields = ['id', 'room', 'group', 'check_in_date', 'check_out_date', 'price', 'created_on']
+
+    def validate(self, attrs):
+        check_in = attrs.get('check_in_date')
+        check_out = attrs.get('check_out_date')
+
+        if check_in and check_out and check_out <= check_in:
+            raise ValidationError({'check_out_date': 'Check-out date must be after check-in date.'})
+
+        room = attrs.get('room')
+        if room and check_in and check_out:
+            instance_id = self.instance.id if self.instance else None
+            overlapping = Reservation.objects.filter(
+                room=room,
+                check_in_date__lt=check_out,
+                check_out_date__gt=check_in,
+            )
+            if instance_id:
+                overlapping = overlapping.exclude(id=instance_id)
+            if overlapping.exists():
+                raise ValidationError('This room already has a reservation overlapping those dates.')
+
+        return attrs
+
+
+class AmenitySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Amenity
+        fields = ['id', 'name', 'price', 'charge_type', 'created_on']
+
+
+class StayLogAmenitySerializer(serializers.ModelSerializer):
+    amenity_name = serializers.CharField(source='amenity.name', read_only=True)
+    amenity_price = serializers.DecimalField(source='amenity.price', max_digits=7, decimal_places=0, read_only=True)
+    charge_type = serializers.CharField(source='amenity.charge_type', read_only=True)
+
+    class Meta:
+        model = StayLogAmenity
+        fields = ['id', 'stay_log', 'amenity', 'quantity', 'amenity_name', 'amenity_price', 'charge_type']
+        extra_kwargs = {'stay_log': {'read_only': True}}
+
+
+class ActiveStayLogSerializer(StayLogSerializer):
+    customers = serializers.SerializerMethodField()
+    amenities = serializers.SerializerMethodField()
+    payments = serializers.SerializerMethodField()
+    nc_status = serializers.SerializerMethodField()
+
+    class Meta(StayLogSerializer.Meta):
+        fields = StayLogSerializer.Meta.fields + ['is_nc', 'customers', 'amenities', 'payments', 'nc_status']
+
+    def get_customers(self, obj):
+        return [{'id': cg.customer.id, 'name': cg.customer.name} for cg in obj.group.customers.all()]
+
+    def get_amenities(self, obj):
+        return [
+            {
+                'id': sa.id,
+                'amenity_id': sa.amenity_id,
+                'name': sa.amenity.name,
+                'price': sa.amenity.price,
+                'charge_type': sa.amenity.charge_type,
+                'quantity': sa.quantity,
+            }
+            for sa in obj.amenities.all()
+        ]
+
+    def get_payments(self, obj):
+        return [
+            {
+                'id': p.id,
+                'payment_type': p.payment_type,
+                'amount': p.amount,
+                'processed_by_name': p.processed_by.get_full_name() or p.processed_by.username if p.processed_by else None,
+                'note': p.note,
+                'created_on': p.created_on,
+            }
+            for p in obj.payments.all()
+        ]
+
+    def get_nc_status(self, obj):
+        latest = obj.nc_requests.order_by('-created_on').first()
+        if not latest:
+            return None
+        return {'id': latest.id, 'status': latest.status, 'reason': latest.reason}
+
+
+class RoomNCRequestSerializer(serializers.ModelSerializer):
+    requested_by_name = serializers.SerializerMethodField()
+    reviewed_by_name = serializers.SerializerMethodField()
+    room_number = serializers.SerializerMethodField()
+    guest_names = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RoomNCRequest
+        fields = ['id', 'stay_log', 'reason', 'status', 'requested_by', 'requested_by_name',
+                  'reviewed_by', 'reviewed_by_name', 'created_on', 'reviewed_on', 'room_number', 'guest_names']
+        read_only_fields = ['status', 'requested_by', 'reviewed_by', 'reviewed_on']
+
+    def get_requested_by_name(self, obj):
+        if obj.requested_by:
+            return obj.requested_by.get_full_name() or obj.requested_by.username
+        return None
+
+    def get_reviewed_by_name(self, obj):
+        if obj.reviewed_by:
+            return obj.reviewed_by.get_full_name() or obj.reviewed_by.username
+        return None
+
+    def get_room_number(self, obj):
+        return obj.stay_log.room.room_number
+
+    def get_guest_names(self, obj):
+        return [cg.customer.name for cg in obj.stay_log.group.customers.all()]
+
+
+class PaymentSerializer(serializers.ModelSerializer):
+    processed_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Payment
+        fields = ['id', 'stay_log', 'payment_type', 'amount', 'processed_by', 'processed_by_name', 'note', 'created_on']
+        read_only_fields = ['processed_by']
+        extra_kwargs = {'stay_log': {'read_only': True}}
+
+    def get_processed_by_name(self, obj):
+        if obj.processed_by:
+            return obj.processed_by.get_full_name() or obj.processed_by.username
+        return None
+
+
+class CashWithdrawalSerializer(serializers.ModelSerializer):
+    requested_by_name = serializers.SerializerMethodField()
+    reviewed_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CashWithdrawal
+        fields = ['id', 'amount', 'reason', 'status', 'requested_by', 'requested_by_name',
+                  'reviewed_by', 'reviewed_by_name', 'created_on', 'reviewed_on', 'date']
+        read_only_fields = ['status', 'requested_by', 'reviewed_by', 'reviewed_on']
+
+    def get_requested_by_name(self, obj):
+        if obj.requested_by:
+            return obj.requested_by.get_full_name() or obj.requested_by.username
+        return None
+
+    def get_reviewed_by_name(self, obj):
+        if obj.reviewed_by:
+            return obj.reviewed_by.get_full_name() or obj.reviewed_by.username
+        return None
+
+
+class ExpenseSerializer(serializers.ModelSerializer):
+    recorded_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Expense
+        fields = ['id', 'description', 'amount', 'payment_type', 'recorded_by', 'recorded_by_name', 'date', 'created_on']
+        read_only_fields = ['recorded_by']
+
+    def get_recorded_by_name(self, obj):
+        if obj.recorded_by:
+            return obj.recorded_by.get_full_name() or obj.recorded_by.username
+        return None
