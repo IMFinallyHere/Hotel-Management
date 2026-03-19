@@ -77,5 +77,5 @@ urlpatterns = [
     path('users/<int:pk>/', UserDetail.as_view(), name='user-detail'),
     path('groups/', GroupListCreate.as_view(), name='group-list-create'),
     path('groups/<int:pk>/', GroupDetail.as_view(), name='group-detail'),
-    path('permissions/', PermissionListView.as_view(), name='permission-list'),
+    path('permissions/', PermissionListView.as_view(), name='permission-list')
 ]
