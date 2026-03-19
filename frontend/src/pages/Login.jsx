@@ -1,7 +1,7 @@
 import { TextInput, PasswordInput, Button, Paper, Title, Stack, Center } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import api from '../api/client';
 import { notifyError } from '../api/notify';
 
 export default function Login() {
@@ -16,7 +16,7 @@ export default function Login() {
 
   const handleSubmit = async (values) => {
     try {
-      const { data } = await axios.post('/auth/token/', values);
+      const { data } = await api.post('auth/token/', values);
       localStorage.setItem('access_token', data.access);
       localStorage.setItem('refresh_token', data.refresh);
       navigate('/');
