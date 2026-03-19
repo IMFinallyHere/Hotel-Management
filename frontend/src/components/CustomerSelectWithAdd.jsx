@@ -7,7 +7,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import api from '../api/client';
 import { QUERY_KEYS, fetchAllCustomers, fetchCountryCodes } from '../api/queries';
+import { compressImage } from '../utils/imageUtils';
 import { notifySuccess, notifyError } from '../api/notify';
+import { parseApiError } from '../api/errorUtils';
 
 function CustomerAddModal({ opened, onClose, onAdded }) {
   const qc = useQueryClient();
@@ -32,10 +34,22 @@ function CustomerAddModal({ opened, onClose, onAdded }) {
       identity_card_2: null,
     },
     validate: {
-      name: (v) => v.trim() ? null : 'Required',
-      number: (v) => v.trim() ? null : 'Required',
+      name: (v) => {
+        if (!v || !v.trim()) return 'Required';
+        if (!/^[A-Za-z\s]+$/.test(v.trim())) return 'Name must contain only letters';
+        return null;
+      },
+      number: (v) => {
+        if (!v || !v.trim()) return 'Required';
+        if (!/^\d+$/.test(v)) return 'Phone must contain only digits';
+        return null;
+      },
       country_code: (v) => v ? null : 'Required',
       gender: (v) => v ? null : 'Required',
+      pincode: (v) => {
+        if (v && !/^\d+$/.test(v)) return 'Pincode must contain only digits';
+        return null;
+      },
     },
   });
 
@@ -47,6 +61,8 @@ function CustomerAddModal({ opened, onClose, onAdded }) {
   const handleSubmit = async (values) => {
     setLoading(true);
     try {
+      const card1 = values.identity_card_1 instanceof File ? await compressImage(values.identity_card_1) : null;
+      const card2 = values.identity_card_2 instanceof File ? await compressImage(values.identity_card_2) : null;
       const fd = new FormData();
       fd.append('name', values.name.trim());
       fd.append('number', values.number.trim());
@@ -55,17 +71,15 @@ function CustomerAddModal({ opened, onClose, onAdded }) {
       if (values.dob) fd.append('date_of_birth', dayjs(values.dob).format('YYYY-MM-DD'));
       if (values.address.trim()) fd.append('address', values.address.trim());
       if (values.pincode.trim()) fd.append('pincode', values.pincode.trim());
-      if (values.identity_card_1 instanceof File) fd.append('identity_card_1', values.identity_card_1);
-      if (values.identity_card_2 instanceof File) fd.append('identity_card_2', values.identity_card_2);
+      if (card1) fd.append('identity_card_1', card1);
+      if (card2) fd.append('identity_card_2', card2);
       const { data } = await api.post('/v1/customers/', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       qc.invalidateQueries({ queryKey: QUERY_KEYS.customers });
       notifySuccess(`Customer "${data.name}" added.`);
       onAdded(data);
       handleClose();
     } catch (e) {
-      const errors = e.response?.data;
-      const msg = typeof errors === 'object' ? Object.values(errors).flat().join(' ') : 'Failed to add customer.';
-      notifyError(msg);
+      notifyError(parseApiError(e, 'Failed to add customer.'));
     } finally {
       setLoading(false);
     }
@@ -74,8 +88,26 @@ function CustomerAddModal({ opened, onClose, onAdded }) {
   return (
     <Modal opened={opened} onClose={handleClose} title="Add New Customer" zIndex={300} size="lg">
       <form onSubmit={form.onSubmit(handleSubmit)}>
-        <TextInput label="Full Name" {...form.getInputProps('name')} mb="sm" required />
-        <TextInput label="Phone Number" {...form.getInputProps('number')} mb="sm" required />
+        <TextInput
+          label="Full Name"
+          {...form.getInputProps('name')}
+          mb="sm"
+          required
+          onKeyDown={(e) => {
+            if (!/^[A-Za-z\s]$/.test(e.key) && !['Backspace','Delete','ArrowLeft','ArrowRight','Tab'].includes(e.key))
+              e.preventDefault();
+          }}
+        />
+        <TextInput
+          label="Phone Number"
+          {...form.getInputProps('number')}
+          mb="sm"
+          required
+          onKeyDown={(e) => {
+            if (!/^\d$/.test(e.key) && !['Backspace','Delete','ArrowLeft','ArrowRight','Tab'].includes(e.key))
+              e.preventDefault();
+          }}
+        />
         <Select
           label="Country Code"
           data={countryCodes.map(c => ({ value: String(c.id), label: `+${c.country_code} (${c.country_name})` }))}
@@ -98,7 +130,15 @@ function CustomerAddModal({ opened, onClose, onAdded }) {
         />
         <DatePickerInput label="Date of Birth (optional)" {...form.getInputProps('dob')} mb="sm" clearable />
         <TextInput label="Address (optional)" {...form.getInputProps('address')} mb="sm" />
-        <TextInput label="Pincode (optional)" {...form.getInputProps('pincode')} mb="sm" />
+        <TextInput
+          label="Pincode (optional)"
+          {...form.getInputProps('pincode')}
+          mb="sm"
+          onKeyDown={(e) => {
+            if (!/^\d$/.test(e.key) && !['Backspace','Delete','ArrowLeft','ArrowRight','Tab'].includes(e.key))
+              e.preventDefault();
+          }}
+        />
         <FileInput
           label="Identity Card 1 (optional)"
           leftSection={<IconUpload size={14} />}

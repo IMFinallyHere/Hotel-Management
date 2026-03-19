@@ -8,9 +8,15 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../api/client';
 import { QUERY_KEYS, fetchRoomTypes } from '../api/queries';
 import { notifySuccess, notifyError } from '../api/notify';
+import { parseApiError } from '../api/errorUtils';
+import usePermissions from '../hooks/usePermissions';
 
 export default function RoomTypes() {
   const qc = useQueryClient();
+  const { permissions } = usePermissions();
+  const canAdd    = permissions.add_roomtype    || permissions.is_superuser;
+  const canChange = permissions.change_roomtype || permissions.is_superuser;
+  const canDelete = permissions.delete_roomtype || permissions.is_superuser;
   const { data = [], isLoading } = useQuery({ queryKey: QUERY_KEYS.roomTypes, queryFn: fetchRoomTypes });
   const [opened, { open, close }] = useDisclosure(false);
   const [editing, setEditing] = useState(null);
@@ -28,13 +34,13 @@ export default function RoomTypes() {
       ? api.put(`/v1/room/types/${editing.id}/`, values)
       : api.post('/v1/room/types/', values),
     onSuccess: () => { qc.invalidateQueries(QUERY_KEYS.roomTypes); close(); notifySuccess('Saved.'); },
-    onError: () => notifyError('Failed to save.'),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to save.')),
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id) => api.delete(`/v1/room/types/${id}/`),
     onSuccess: () => { qc.invalidateQueries(QUERY_KEYS.roomTypes); notifySuccess('Deleted.'); },
-    onError: () => notifyError('Failed to delete.'),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to delete.')),
   });
 
   const handleDelete = (id) => modals.openConfirmModal({
@@ -51,8 +57,8 @@ export default function RoomTypes() {
       <Table.Td>{new Date(rt.created_on).toLocaleString()}</Table.Td>
       <Table.Td>
         <Group gap="xs">
-          <Button size="xs" variant="light" onClick={() => openEdit(rt)}>Edit</Button>
-          <Button size="xs" color="red" variant="light" onClick={() => handleDelete(rt.id)}>Delete</Button>
+          {canChange && <Button size="xs" variant="light" onClick={() => openEdit(rt)}>Edit</Button>}
+          {canDelete && <Button size="xs" color="red" variant="light" onClick={() => handleDelete(rt.id)}>Delete</Button>}
         </Group>
       </Table.Td>
     </Table.Tr>
@@ -61,9 +67,10 @@ export default function RoomTypes() {
   return (
     <>
       <Group mb="md">
-        <Button leftSection={<IconPlus size={16} />} onClick={openAdd}>Add Room Type</Button>
+        {canAdd && <Button leftSection={<IconPlus size={16} />} onClick={openAdd}>Add Room Type</Button>}
       </Group>
 
+      <Table.ScrollContainer minWidth={400}>
       <Table striped highlightOnHover withTableBorder>
         <Table.Thead>
           <Table.Tr>
@@ -80,8 +87,9 @@ export default function RoomTypes() {
           ) : rows}
         </Table.Tbody>
       </Table>
+      </Table.ScrollContainer>
 
-      <Modal opened={opened} onClose={close} title={editing ? 'Edit Room Type' : 'Add Room Type'}>
+      <Modal opened={opened} onClose={close} title={editing ? 'Edit Room Type' : 'Add Room Type'} size={{ base: '95%', sm: 'lg' }}>
         <form onSubmit={form.onSubmit(v => saveMutation.mutate(v))}>
           <TextInput label="Name" {...form.getInputProps('name')} mb="md" required />
           <Group justify="flex-end">

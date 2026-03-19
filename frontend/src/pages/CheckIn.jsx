@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import api from '../api/client';
 import { QUERY_KEYS, fetchRooms, fetchActiveLogs } from '../api/queries';
 import { notifyError } from '../api/notify';
+import { parseApiError } from '../api/errorUtils';
 import CustomerSelectWithAdd from '../components/CustomerSelectWithAdd';
 
 export default function CheckIn() {
@@ -42,7 +43,7 @@ export default function CheckIn() {
       setGroupId(data.group_id);
       setActive(1);
     } catch (e) {
-      notifyError(e.response?.data?.detail ?? 'Failed to create group.');
+      notifyError(parseApiError(e, 'Failed to create group.'));
     } finally {
       setLoading(false);
     }
@@ -58,9 +59,7 @@ export default function CheckIn() {
       await api.post('/v1/checkin/', { ...values, room: parseInt(values.room), group: groupId });
       setDone(true);
     } catch (e) {
-      const errors = e.response?.data;
-      const msg = typeof errors === 'object' ? Object.values(errors).flat().join(' ') : 'Check-in failed.';
-      notifyError(msg);
+      notifyError(parseApiError(e, 'Check-in failed.'));
     } finally {
       setLoading(false);
     }

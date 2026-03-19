@@ -1,16 +1,12 @@
 from django.contrib.auth.models import User, Group, Permission
 from django.db.models import Count
 from rest_framework import generics
-from rest_framework.permissions import BasePermission, IsAuthenticated
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .auth_serializers import UserSerializer, GroupSerializer, PermissionSerializer
-
-
-class IsSuperUser(BasePermission):
-    def has_permission(self, request, view):
-        return request.user.is_authenticated and request.user.is_superuser
+from .permissions import HasModelPermission
 
 
 # ---- User endpoints ----
@@ -18,13 +14,13 @@ class IsSuperUser(BasePermission):
 class UserListCreate(generics.ListCreateAPIView):
     queryset = User.objects.all().prefetch_related('groups')
     serializer_class = UserSerializer
-    permission_classes = [IsSuperUser]
+    permission_classes = [HasModelPermission.for_model('auth', 'user')]
 
 
 class UserDetail(generics.RetrieveUpdateDestroyAPIView):
     queryset = User.objects.all().prefetch_related('groups')
     serializer_class = UserSerializer
-    permission_classes = [IsSuperUser]
+    permission_classes = [HasModelPermission.for_model('auth', 'user')]
 
     def perform_update(self, serializer):
         user = self.get_object()
@@ -51,13 +47,13 @@ class UserDetail(generics.RetrieveUpdateDestroyAPIView):
 class GroupListCreate(generics.ListCreateAPIView):
     queryset = Group.objects.annotate(user_count=Count('user')).prefetch_related('permissions')
     serializer_class = GroupSerializer
-    permission_classes = [IsSuperUser]
+    permission_classes = [HasModelPermission.for_model('auth', 'group')]
 
 
 class GroupDetail(generics.RetrieveUpdateDestroyAPIView):
     queryset = Group.objects.annotate(user_count=Count('user')).prefetch_related('permissions')
     serializer_class = GroupSerializer
-    permission_classes = [IsSuperUser]
+    permission_classes = [HasModelPermission.for_model('auth', 'group')]
 
 
 # ---- Permission list ----
@@ -66,7 +62,7 @@ EXCLUDED_APP_LABELS = {'contenttypes', 'sessions', 'admin', 'token_blacklist'}
 
 
 class PermissionListView(APIView):
-    permission_classes = [IsSuperUser]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         perms = Permission.objects.select_related('content_type').exclude(

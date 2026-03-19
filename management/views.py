@@ -11,7 +11,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, Group, CustomerGroup, RoomsPriceChart, Reservation, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense
 from .serializers import RoomSerializer, RoomTypeSerializer, CountryCodeSerializer, CustomerSerializer, ConfigurationSerializer, CheckinSerializer, GroupCustomerSerializer, RoomsPriceChartSerializer, StayLogSerializer, StayLogUpdateSerializer, ReservationSerializer, AmenitySerializer, StayLogAmenitySerializer, ActiveStayLogSerializer, RoomNCRequestSerializer, PaymentSerializer, CashWithdrawalSerializer, ExpenseSerializer
-from .permissions import report_permission
+from .permissions import report_permission, HasModelPermission
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.permissions import DjangoModelPermissions
 from rest_framework.response import Response
@@ -1028,7 +1028,7 @@ class UserPermissionsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        perms = [
+        report_perms = [
             'view_revenue_report',
             'view_occupancy_report',
             'view_guest_report',
@@ -1045,8 +1045,47 @@ class UserPermissionsView(APIView):
             'view_cash_reconciliation',
             'view_expense_report',
         ]
-        result = {p: request.user.has_perm(f'management.{p}') for p in perms}
+        admin_perms = [
+            'add_user',
+            'change_user',
+            'delete_user',
+            'view_user',
+            'add_group',
+            'change_group',
+            'delete_group',
+            'view_group',
+        ]
+        ops_settings_perms = [
+            'view_rooms', 'view_roomstaylogs', 'view_customers',
+            'view_expense', 'view_roomncrequest', 'view_cashwithdrawal',
+            'view_roomtype', 'view_roomspricechart', 'view_countrycodes',
+            'view_amenity', 'view_configurations',
+        ]
+        result = {p: request.user.has_perm(f'management.{p}') for p in report_perms}
+        for p in admin_perms:
+            result[p] = request.user.has_perm(f'auth.{p}')
+        for p in ops_settings_perms:
+            result[p] = request.user.has_perm(f'management.{p}')
+        crud_perms = [
+            'add_rooms', 'change_rooms', 'delete_rooms',
+            'add_customers', 'change_customers', 'delete_customers',
+            'add_expense', 'change_expense', 'delete_expense',
+            'add_roomncrequest', 'change_roomncrequest', 'delete_roomncrequest',
+            'add_cashwithdrawal', 'change_cashwithdrawal', 'delete_cashwithdrawal',
+            'add_roomtype', 'change_roomtype', 'delete_roomtype',
+            'add_roomspricechart', 'change_roomspricechart', 'delete_roomspricechart',
+            'add_countrycodes', 'change_countrycodes', 'delete_countrycodes',
+            'add_amenity', 'change_amenity', 'delete_amenity',
+            'add_configurations', 'change_configurations', 'delete_configurations',
+        ]
+        for p in crud_perms:
+            result[p] = request.user.has_perm(f'management.{p}')
         result['is_superuser'] = request.user.is_superuser
+        result['is_staff'] = request.user.is_staff
+        result['username'] = request.user.username
+        result['first_name'] = request.user.first_name
+        result['last_name'] = request.user.last_name
+        result['email'] = request.user.email
         return Response(result)
 
 
@@ -1054,7 +1093,7 @@ class UserPermissionsView(APIView):
 
 class NcRequestListCreate(generics.ListCreateAPIView):
     serializer_class = RoomNCRequestSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [HasModelPermission.for_model('management', 'roomncrequest')]
 
     def get_queryset(self):
         return RoomNCRequest.objects.select_related(
@@ -1067,7 +1106,7 @@ class NcRequestListCreate(generics.ListCreateAPIView):
 
 class NcRequestDetail(generics.RetrieveUpdateAPIView):
     serializer_class = RoomNCRequestSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [HasModelPermission.for_model('management', 'roomncrequest')]
 
     def get_queryset(self):
         return RoomNCRequest.objects.select_related('stay_log__room', 'stay_log__group', 'requested_by', 'reviewed_by')
@@ -1085,11 +1124,11 @@ class NcRequestDetail(generics.RetrieveUpdateAPIView):
 
 
 class NcRequestApprove(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [HasModelPermission.for_model('management', 'roomncrequest')]
 
     def post(self, request, pk):
-        if not request.user.is_superuser:
-            return Response({'error': 'Admin only.'}, status=403)
+        if not request.user.is_superuser and not request.user.has_perm('management.change_roomncrequest'):
+            return Response({'error': 'Permission denied.'}, status=403)
         nc = get_object_or_404(RoomNCRequest, pk=pk)
         if nc.status != 'pending':
             return Response({'error': 'Request is not pending.'}, status=400)
@@ -1103,11 +1142,11 @@ class NcRequestApprove(APIView):
 
 
 class NcRequestReject(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [HasModelPermission.for_model('management', 'roomncrequest')]
 
     def post(self, request, pk):
-        if not request.user.is_superuser:
-            return Response({'error': 'Admin only.'}, status=403)
+        if not request.user.is_superuser and not request.user.has_perm('management.change_roomncrequest'):
+            return Response({'error': 'Permission denied.'}, status=403)
         nc = get_object_or_404(RoomNCRequest, pk=pk)
         if nc.status != 'pending':
             return Response({'error': 'Request is not pending.'}, status=400)
@@ -1141,7 +1180,7 @@ class StayLogPaymentDetail(generics.RetrieveDestroyAPIView):
 
 class CashWithdrawalListCreate(generics.ListCreateAPIView):
     serializer_class = CashWithdrawalSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [HasModelPermission.for_model('management', 'cashwithdrawal')]
 
     def get_queryset(self):
         return CashWithdrawal.objects.select_related('requested_by', 'reviewed_by').order_by('-created_on')
@@ -1152,18 +1191,18 @@ class CashWithdrawalListCreate(generics.ListCreateAPIView):
 
 class CashWithdrawalDetail(generics.RetrieveUpdateAPIView):
     serializer_class = CashWithdrawalSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [HasModelPermission.for_model('management', 'cashwithdrawal')]
 
     def get_queryset(self):
         return CashWithdrawal.objects.select_related('requested_by', 'reviewed_by')
 
 
 class CashWithdrawalApprove(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [HasModelPermission.for_model('management', 'cashwithdrawal')]
 
     def post(self, request, pk):
-        if not request.user.is_superuser:
-            return Response({'error': 'Admin only.'}, status=403)
+        if not request.user.is_superuser and not request.user.has_perm('management.change_cashwithdrawal'):
+            return Response({'error': 'Permission denied.'}, status=403)
         w = get_object_or_404(CashWithdrawal, pk=pk)
         if w.status != 'pending':
             return Response({'error': 'Withdrawal is not pending.'}, status=400)
@@ -1175,11 +1214,11 @@ class CashWithdrawalApprove(APIView):
 
 
 class CashWithdrawalReject(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [HasModelPermission.for_model('management', 'cashwithdrawal')]
 
     def post(self, request, pk):
-        if not request.user.is_superuser:
-            return Response({'error': 'Admin only.'}, status=403)
+        if not request.user.is_superuser and not request.user.has_perm('management.change_cashwithdrawal'):
+            return Response({'error': 'Permission denied.'}, status=403)
         w = get_object_or_404(CashWithdrawal, pk=pk)
         if w.status != 'pending':
             return Response({'error': 'Withdrawal is not pending.'}, status=400)

@@ -10,11 +10,17 @@ import dayjs from 'dayjs';
 import api from '../api/client';
 import { QUERY_KEYS_OPS, fetchExpenses } from '../api/queries';
 import { notifySuccess, notifyError } from '../api/notify';
+import { parseApiError } from '../api/errorUtils';
+import usePermissions from '../hooks/usePermissions';
 
 const PAYMENT_TYPE_COLORS = { cash: 'green', upi: 'blue', card: 'violet', other: 'gray' };
 
 export default function Expenses() {
   const qc = useQueryClient();
+  const { permissions } = usePermissions();
+  const canAdd    = permissions.add_expense    || permissions.is_superuser;
+  const canChange = permissions.change_expense || permissions.is_superuser;
+  const canDelete = permissions.delete_expense || permissions.is_superuser;
   const [dateFilter, setDateFilter] = useState(new Date());
   const [opened, { open, close }] = useDisclosure(false);
   const [editing, setEditing] = useState(null);
@@ -73,7 +79,7 @@ export default function Expenses() {
       close();
       notifySuccess('Saved.');
     },
-    onError: () => notifyError('Failed to save.'),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to save.')),
   });
 
   const deleteMutation = useMutation({
@@ -82,7 +88,7 @@ export default function Expenses() {
       qc.invalidateQueries({ queryKey: ['expenses'] });
       notifySuccess('Deleted.');
     },
-    onError: () => notifyError('Failed to delete.'),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to delete.')),
   });
 
   const handleDelete = (id) => modals.openConfirmModal({
@@ -108,8 +114,8 @@ export default function Expenses() {
       <Table.Td>{exp.recorded_by_name ?? '—'}</Table.Td>
       <Table.Td>
         <Group gap="xs">
-          <Button size="xs" variant="light" onClick={() => openEdit(exp)}>Edit</Button>
-          <Button size="xs" color="red" variant="light" onClick={() => handleDelete(exp.id)}>Delete</Button>
+          {canChange && <Button size="xs" variant="light" onClick={() => openEdit(exp)}>Edit</Button>}
+          {canDelete && <Button size="xs" color="red" variant="light" onClick={() => handleDelete(exp.id)}>Delete</Button>}
         </Group>
       </Table.Td>
     </Table.Tr>
@@ -117,8 +123,8 @@ export default function Expenses() {
 
   return (
     <>
-      <Group mb="md" justify="space-between">
-        <Group>
+      <Group mb="md" justify="space-between" wrap="wrap">
+        <Group wrap="wrap">
           <DatePickerInput
             label="Date"
             value={dateFilter}
@@ -129,11 +135,14 @@ export default function Expenses() {
             <Text size="sm" c="dimmed" mt="xl">Total: <strong>₹{totalForDay}</strong></Text>
           )}
         </Group>
-        <Button leftSection={<IconPlus size={16} />} onClick={openAdd} mt="xl">
-          Add Expense
-        </Button>
+        {canAdd && (
+          <Button leftSection={<IconPlus size={16} />} onClick={openAdd} mt="xl">
+            Add Expense
+          </Button>
+        )}
       </Group>
 
+      <Table.ScrollContainer minWidth={600}>
       <Table striped highlightOnHover withTableBorder>
         <Table.Thead>
           <Table.Tr>
@@ -153,8 +162,9 @@ export default function Expenses() {
           ) : rows}
         </Table.Tbody>
       </Table>
+      </Table.ScrollContainer>
 
-      <Modal opened={opened} onClose={close} title={editing ? 'Edit Expense' : 'Add Expense'}>
+      <Modal opened={opened} onClose={close} title={editing ? 'Edit Expense' : 'Add Expense'} size={{ base: '95%', sm: 'lg' }}>
         <form onSubmit={form.onSubmit(v => saveMutation.mutate(v))}>
           <Stack gap="sm">
             <TextInput label="Description" {...form.getInputProps('description')} required />

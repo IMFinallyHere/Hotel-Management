@@ -8,6 +8,7 @@ import dayjs from 'dayjs';
 import api from '../api/client';
 import { QUERY_KEYS_OPS, fetchCashWithdrawals } from '../api/queries';
 import { notifySuccess, notifyError } from '../api/notify';
+import { parseApiError } from '../api/errorUtils';
 import usePermissions from '../hooks/usePermissions';
 
 const STATUS_COLORS = { pending: 'orange', approved: 'green', rejected: 'red' };
@@ -15,7 +16,8 @@ const STATUS_COLORS = { pending: 'orange', approved: 'green', rejected: 'red' };
 export default function CashDrawer() {
   const qc = useQueryClient();
   const { permissions } = usePermissions();
-  const isAdmin = permissions.is_superuser;
+  const canWithdraw = permissions.add_cashwithdrawal  || permissions.is_superuser;
+  const canApprove  = permissions.change_cashwithdrawal || permissions.is_superuser;
 
   const { data: withdrawals = [], isLoading } = useQuery({
     queryKey: QUERY_KEYS_OPS.cashWithdrawals,
@@ -40,7 +42,7 @@ export default function CashDrawer() {
       form.reset();
       notifySuccess('Withdrawal request submitted.');
     },
-    onError: () => notifyError('Failed to submit withdrawal.'),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to submit withdrawal.')),
   });
 
   const approveMutation = useMutation({
@@ -49,7 +51,7 @@ export default function CashDrawer() {
       qc.invalidateQueries(QUERY_KEYS_OPS.cashWithdrawals);
       notifySuccess('Withdrawal approved.');
     },
-    onError: (e) => notifyError(e.response?.data?.error ?? 'Failed to approve.'),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to approve.')),
   });
 
   const rejectMutation = useMutation({
@@ -58,7 +60,7 @@ export default function CashDrawer() {
       qc.invalidateQueries(QUERY_KEYS_OPS.cashWithdrawals);
       notifySuccess('Withdrawal rejected.');
     },
-    onError: (e) => notifyError(e.response?.data?.error ?? 'Failed to reject.'),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to reject.')),
   });
 
   const rows = withdrawals.map((w) => (
@@ -72,7 +74,7 @@ export default function CashDrawer() {
       <Table.Td>{w.requested_by_name ?? '—'}</Table.Td>
       <Table.Td>{w.reviewed_by_name ?? '—'}</Table.Td>
       <Table.Td>
-        {isAdmin && w.status === 'pending' && (
+        {canApprove && w.status === 'pending' && (
           <Group gap="xs">
             <Button size="xs" color="green" variant="light" onClick={() => approveMutation.mutate(w.id)} loading={approveMutation.isPending}>
               Approve
@@ -88,18 +90,21 @@ export default function CashDrawer() {
 
   return (
     <>
-      <Group mb="md" justify="space-between">
-        <Group>
+      <Group mb="md" justify="space-between" wrap="wrap">
+        <Group wrap="wrap">
           <Text fw={600} size="lg">Cash Drawer / Petty Cash</Text>
           <Badge color="orange" variant="light">
             {withdrawals.filter(w => w.status === 'pending').length} pending
           </Badge>
         </Group>
-        <Button leftSection={<IconPlus size={16} />} onClick={() => { form.reset(); open(); }}>
-          New Withdrawal
-        </Button>
+        {canWithdraw && (
+          <Button leftSection={<IconPlus size={16} />} onClick={() => { form.reset(); open(); }}>
+            New Withdrawal
+          </Button>
+        )}
       </Group>
 
+      <Table.ScrollContainer minWidth={600}>
       <Table striped highlightOnHover withTableBorder>
         <Table.Thead>
           <Table.Tr>
@@ -120,8 +125,9 @@ export default function CashDrawer() {
           ) : rows}
         </Table.Tbody>
       </Table>
+      </Table.ScrollContainer>
 
-      <Modal opened={opened} onClose={close} title="New Cash Withdrawal">
+      <Modal opened={opened} onClose={close} title="New Cash Withdrawal" size={{ base: '95%', sm: 'lg' }}>
         <form onSubmit={form.onSubmit(v => createMutation.mutate(v))}>
           <Stack gap="sm">
             <NumberInput

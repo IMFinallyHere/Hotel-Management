@@ -8,9 +8,15 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../api/client';
 import { QUERY_KEYS, fetchUsers, fetchGroups } from '../api/queries';
 import { notifySuccess, notifyError } from '../api/notify';
+import { parseApiError } from '../api/errorUtils';
+import usePermissions from '../hooks/usePermissions';
 
 export default function UserManagement() {
   const qc = useQueryClient();
+  const { permissions } = usePermissions();
+  const canAdd    = permissions.add_user    || permissions.is_superuser;
+  const canChange = permissions.change_user || permissions.is_superuser;
+  const canDelete = permissions.delete_user || permissions.is_superuser;
   const { data: users = [], isLoading } = useQuery({ queryKey: QUERY_KEYS.users, queryFn: fetchUsers });
   const { data: groups = [] } = useQuery({ queryKey: QUERY_KEYS.groups, queryFn: fetchGroups });
   const [opened, { open, close }] = useDisclosure(false);
@@ -55,21 +61,13 @@ export default function UserManagement() {
         : api.post('/v1/users/', payload);
     },
     onSuccess: () => { qc.invalidateQueries(QUERY_KEYS.users); close(); notifySuccess('User saved.'); },
-    onError: (err) => {
-      const data = err.response?.data;
-      const msg = data ? (typeof data === 'string' ? data : Object.values(data).flat().join(' ')) : 'Failed to save.';
-      notifyError(msg);
-    },
+    onError: (err) => notifyError(parseApiError(err, 'Failed to save.')),
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id) => api.delete(`/v1/users/${id}/`),
     onSuccess: () => { qc.invalidateQueries(QUERY_KEYS.users); notifySuccess('User deactivated.'); },
-    onError: (err) => {
-      const data = err.response?.data;
-      const msg = data ? (typeof data === 'string' ? data : Object.values(data).flat().join(' ')) : 'Failed to delete.';
-      notifyError(msg);
-    },
+    onError: (err) => notifyError(parseApiError(err, 'Failed to delete.')),
   });
 
   const handleDelete = (user) => modals.openConfirmModal({
@@ -92,8 +90,8 @@ export default function UserManagement() {
       <Table.Td>{u.date_joined ? new Date(u.date_joined).toLocaleDateString() : '—'}</Table.Td>
       <Table.Td>
         <Group gap="xs">
-          <Button size="xs" variant="light" onClick={() => openEdit(u)}>Edit</Button>
-          <Button size="xs" color="red" variant="light" onClick={() => handleDelete(u)}>Delete</Button>
+          {canChange && <Button size="xs" variant="light" onClick={() => openEdit(u)}>Edit</Button>}
+          {canDelete && <Button size="xs" color="red" variant="light" onClick={() => handleDelete(u)}>Delete</Button>}
         </Group>
       </Table.Td>
     </Table.Tr>
@@ -102,9 +100,10 @@ export default function UserManagement() {
   return (
     <>
       <Group mb="md">
-        <Button leftSection={<IconPlus size={16} />} onClick={openAdd}>Add User</Button>
+        {canAdd && <Button leftSection={<IconPlus size={16} />} onClick={openAdd}>Add User</Button>}
       </Group>
 
+      <Table.ScrollContainer minWidth={750}>
       <Table striped highlightOnHover withTableBorder>
         <Table.Thead>
           <Table.Tr>
@@ -127,8 +126,9 @@ export default function UserManagement() {
           ) : rows}
         </Table.Tbody>
       </Table>
+      </Table.ScrollContainer>
 
-      <Modal opened={opened} onClose={close} title={editing ? 'Edit User' : 'Add User'} size="lg">
+      <Modal opened={opened} onClose={close} title={editing ? 'Edit User' : 'Add User'} size={{ base: '95%', sm: 'lg' }}>
         <form onSubmit={form.onSubmit(v => saveMutation.mutate(v))}>
           <TextInput label="Username" {...form.getInputProps('username')} mb="sm" required />
           <TextInput label="Email" {...form.getInputProps('email')} mb="sm" />

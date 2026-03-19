@@ -8,9 +8,15 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../api/client';
 import { QUERY_KEYS, fetchCountryCodes } from '../api/queries';
 import { notifySuccess, notifyError } from '../api/notify';
+import { parseApiError } from '../api/errorUtils';
+import usePermissions from '../hooks/usePermissions';
 
 export default function CountryCodes() {
   const qc = useQueryClient();
+  const { permissions } = usePermissions();
+  const canAdd    = permissions.add_countrycodes    || permissions.is_superuser;
+  const canChange = permissions.change_countrycodes || permissions.is_superuser;
+  const canDelete = permissions.delete_countrycodes || permissions.is_superuser;
   const { data = [], isLoading } = useQuery({ queryKey: QUERY_KEYS.countryCodes, queryFn: fetchCountryCodes });
   const [opened, { open, close }] = useDisclosure(false);
   const [editing, setEditing] = useState(null);
@@ -35,13 +41,13 @@ export default function CountryCodes() {
       ? api.put(`/v1/country/codes/${editing.id}/`, values)
       : api.post('/v1/country/codes/', values),
     onSuccess: () => { qc.invalidateQueries(QUERY_KEYS.countryCodes); close(); notifySuccess('Saved.'); },
-    onError: () => notifyError('Failed to save.'),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to save.')),
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id) => api.delete(`/v1/country/codes/${id}/`),
     onSuccess: () => { qc.invalidateQueries(QUERY_KEYS.countryCodes); notifySuccess('Deleted.'); },
-    onError: () => notifyError('Failed to delete.'),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to delete.')),
   });
 
   const handleDelete = (id) => modals.openConfirmModal({
@@ -58,8 +64,8 @@ export default function CountryCodes() {
       <Table.Td>+{cc.country_code}</Table.Td>
       <Table.Td>
         <Group gap="xs">
-          <Button size="xs" variant="light" onClick={() => openEdit(cc)}>Edit</Button>
-          <Button size="xs" color="red" variant="light" onClick={() => handleDelete(cc.id)}>Delete</Button>
+          {canChange && <Button size="xs" variant="light" onClick={() => openEdit(cc)}>Edit</Button>}
+          {canDelete && <Button size="xs" color="red" variant="light" onClick={() => handleDelete(cc.id)}>Delete</Button>}
         </Group>
       </Table.Td>
     </Table.Tr>
@@ -68,9 +74,10 @@ export default function CountryCodes() {
   return (
     <>
       <Group mb="md">
-        <Button leftSection={<IconPlus size={16} />} onClick={openAdd}>Add Country Code</Button>
+        {canAdd && <Button leftSection={<IconPlus size={16} />} onClick={openAdd}>Add Country Code</Button>}
       </Group>
 
+      <Table.ScrollContainer minWidth={400}>
       <Table striped highlightOnHover withTableBorder>
         <Table.Thead>
           <Table.Tr>
@@ -87,8 +94,9 @@ export default function CountryCodes() {
           ) : rows}
         </Table.Tbody>
       </Table>
+      </Table.ScrollContainer>
 
-      <Modal opened={opened} onClose={close} title={editing ? 'Edit Country Code' : 'Add Country Code'}>
+      <Modal opened={opened} onClose={close} title={editing ? 'Edit Country Code' : 'Add Country Code'} size={{ base: '95%', sm: 'lg' }}>
         <form onSubmit={form.onSubmit(v => saveMutation.mutate(v))}>
           <TextInput label="Country Name" {...form.getInputProps('country_name')} mb="sm" required />
           <NumberInput label="Dialing Code" min={1} max={999} {...form.getInputProps('country_code')} mb="md" required />

@@ -18,6 +18,7 @@ import {
   fetchGroupCustomers, fetchAmenities,
 } from '../api/queries';
 import { notifySuccess, notifyError } from '../api/notify';
+import { parseApiError } from '../api/errorUtils';
 import CustomerSelectWithAdd from '../components/CustomerSelectWithAdd';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -72,7 +73,7 @@ function CustomerTable({ groupId, allowRemove = false, mainCustomerId = null }) 
       qc.invalidateQueries(QUERY_KEYS.groupCustomers(groupId));
       notifySuccess('Guest removed.');
     },
-    onError: (e) => notifyError(e.response?.data?.error ?? 'Failed to remove guest.'),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to remove guest.')),
   });
 
   const handleRemove = (customer) => modals.openConfirmModal({
@@ -89,45 +90,47 @@ function CustomerTable({ groupId, allowRemove = false, mainCustomerId = null }) 
   const genderLabel = { male: 'Male', female: 'Female', trans: 'Trans', other: 'Other' };
 
   return (
-    <Table striped highlightOnHover withTableBorder>
-      <Table.Thead>
-        <Table.Tr>
-          <Table.Th>Name</Table.Th>
-          <Table.Th>Phone</Table.Th>
-          <Table.Th>Gender</Table.Th>
-          <Table.Th>Address</Table.Th>
-          <Table.Th>DOB</Table.Th>
-          <Table.Th>ID Card 1</Table.Th>
-          <Table.Th>ID Card 2</Table.Th>
-          {allowRemove && <Table.Th>Action</Table.Th>}
-        </Table.Tr>
-      </Table.Thead>
-      <Table.Tbody>
-        {customers.map((c, idx) => {
-          const isMain = mainCustomerId ? c.id === mainCustomerId : idx === 0;
-          return (
-            <Table.Tr key={c.id}>
-              <Table.Td>{c.name}{isMain && <Badge size="xs" variant="light" ml="xs">Main</Badge>}</Table.Td>
-              <Table.Td>{c.number}</Table.Td>
-              <Table.Td>{genderLabel[c.gender] ?? c.gender ?? '—'}</Table.Td>
-              <Table.Td>{[c.address, c.pincode].filter(Boolean).join(', ') || '—'}</Table.Td>
-              <Table.Td>{c.date_of_birth ?? '—'}</Table.Td>
-              <Table.Td>{c.identity_card_1 ? <a href={c.identity_card_1} target="_blank" rel="noopener noreferrer">View</a> : '—'}</Table.Td>
-              <Table.Td>{c.identity_card_2 ? <a href={c.identity_card_2} target="_blank" rel="noopener noreferrer">View</a> : '—'}</Table.Td>
-              {allowRemove && (
-                <Table.Td>
-                  {!isMain && (
-                    <Button size="xs" color="red" variant="light" onClick={() => handleRemove(c)} loading={removeMutation.isPending}>
-                      Remove
-                    </Button>
-                  )}
-                </Table.Td>
-              )}
-            </Table.Tr>
-          );
-        })}
-      </Table.Tbody>
-    </Table>
+    <Table.ScrollContainer minWidth={700}>
+      <Table striped highlightOnHover withTableBorder>
+        <Table.Thead>
+          <Table.Tr>
+            <Table.Th>Name</Table.Th>
+            <Table.Th>Phone</Table.Th>
+            <Table.Th>Gender</Table.Th>
+            <Table.Th>Address</Table.Th>
+            <Table.Th>DOB</Table.Th>
+            <Table.Th>ID Card 1</Table.Th>
+            <Table.Th>ID Card 2</Table.Th>
+            {allowRemove && <Table.Th>Action</Table.Th>}
+          </Table.Tr>
+        </Table.Thead>
+        <Table.Tbody>
+          {customers.map((c, idx) => {
+            const isMain = mainCustomerId ? c.id === mainCustomerId : idx === 0;
+            return (
+              <Table.Tr key={c.id}>
+                <Table.Td>{c.name}{isMain && <Badge size="xs" variant="light" ml="xs">Main</Badge>}</Table.Td>
+                <Table.Td>{c.number}</Table.Td>
+                <Table.Td>{genderLabel[c.gender] ?? c.gender ?? '—'}</Table.Td>
+                <Table.Td>{[c.address, c.pincode].filter(Boolean).join(', ') || '—'}</Table.Td>
+                <Table.Td>{c.date_of_birth ?? '—'}</Table.Td>
+                <Table.Td>{c.identity_card_1 ? <a href={c.identity_card_1} target="_blank" rel="noopener noreferrer">View</a> : '—'}</Table.Td>
+                <Table.Td>{c.identity_card_2 ? <a href={c.identity_card_2} target="_blank" rel="noopener noreferrer">View</a> : '—'}</Table.Td>
+                {allowRemove && (
+                  <Table.Td>
+                    {!isMain && (
+                      <Button size="xs" color="red" variant="light" onClick={() => handleRemove(c)} loading={removeMutation.isPending}>
+                        Remove
+                      </Button>
+                    )}
+                  </Table.Td>
+                )}
+              </Table.Tr>
+            );
+          })}
+        </Table.Tbody>
+      </Table>
+    </Table.ScrollContainer>
   );
 }
 
@@ -184,7 +187,7 @@ function StatusTab({ room, activeLogs, isReservedToday }) {
       closeBeds();
       notifySuccess('Beds updated.');
     },
-    onError: () => notifyError('Failed to update beds.'),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to update beds.')),
   });
 
   // ── Add guest (item 7) ──
@@ -207,7 +210,7 @@ function StatusTab({ room, activeLogs, isReservedToday }) {
       addGuestForm.reset();
       notifySuccess('Guest(s) added.');
     },
-    onError: () => notifyError('Failed to add guest(s).'),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to add guest(s).')),
   });
 
   // ── Amenities ──
@@ -221,7 +224,7 @@ function StatusTab({ room, activeLogs, isReservedToday }) {
       setNewAmenityQty(1);
       notifySuccess('Amenity added.');
     },
-    onError: (e) => notifyError(e.response?.data?.non_field_errors?.[0] ?? e.response?.data?.amenity?.[0] ?? 'Failed to add amenity.'),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to add amenity.')),
   });
 
   const removeAmenityMutation = useMutation({
@@ -230,7 +233,7 @@ function StatusTab({ room, activeLogs, isReservedToday }) {
       qc.invalidateQueries(QUERY_KEYS.activeLogs);
       notifySuccess('Amenity removed.');
     },
-    onError: () => notifyError('Failed to remove amenity.'),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to remove amenity.')),
   });
 
   // ── Single-step check-in (item 4) ──
@@ -257,9 +260,7 @@ function StatusTab({ room, activeLogs, isReservedToday }) {
       checkinForm.reset();
       notifySuccess('Check-in successful.');
     } catch (e) {
-      const errors = e.response?.data;
-      const msg = typeof errors === 'object' ? Object.values(errors).flat().join(' ') : 'Check-in failed.';
-      notifyError(msg);
+      notifyError(parseApiError(e, 'Check-in failed.'));
     } finally {
       setSubmitLoading(false);
     }
@@ -275,7 +276,7 @@ function StatusTab({ room, activeLogs, isReservedToday }) {
       setNcReason('');
       notifySuccess('NC request submitted.');
     },
-    onError: () => notifyError('Failed to submit NC request.'),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to submit NC request.')),
   });
 
   // ── Occupied (items 5, 6, 7) ──
@@ -566,7 +567,7 @@ function ReservationsTab({ room, reservations, isOccupied }) {
       qc.invalidateQueries(QUERY_KEYS.roomReservations(room.id));
       notifySuccess('Reservation deleted.');
     },
-    onError: () => notifyError('Failed to delete reservation.'),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to delete reservation.')),
   });
 
   const handleDelete = (id) => modals.openConfirmModal({
@@ -591,9 +592,7 @@ function ReservationsTab({ room, reservations, isOccupied }) {
         qc.invalidateQueries(QUERY_KEYS.roomReservations(room.id));
         notifySuccess('Reservation converted to check-in.');
       } catch (e) {
-        const errors = e.response?.data;
-        const msg = typeof errors === 'object' ? Object.values(errors).flat().join(' ') : 'Failed to convert reservation.';
-        notifyError(msg);
+        notifyError(parseApiError(e, 'Failed to convert reservation.'));
       } finally {
         setConvertingId(null);
       }
@@ -616,9 +615,7 @@ function ReservationsTab({ room, reservations, isOccupied }) {
       form.reset();
       notifySuccess('Reservation added.');
     } catch (e) {
-      const errors = e.response?.data;
-      const msg = typeof errors === 'object' ? Object.values(errors).flat().join(' ') : 'Failed to add reservation.';
-      notifyError(msg);
+      notifyError(parseApiError(e, 'Failed to add reservation.'));
     } finally {
       setLoading(false);
     }
@@ -724,7 +721,7 @@ function RoomDetailsTab({ room }) {
       qc.invalidateQueries(QUERY_KEYS.rooms);
       notifySuccess('Room updated.');
     },
-    onError: () => notifyError('Failed to save.'),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to save.')),
   });
 
   return (
@@ -770,7 +767,7 @@ export default function RoomDetail() {
       qc.invalidateQueries(QUERY_KEYS.rooms);
       notifySuccess('Checkout successful.');
     },
-    onError: (e) => notifyError(e.response?.data?.error ?? 'Checkout failed.'),
+    onError: (e) => notifyError(parseApiError(e, 'Checkout failed.')),
   });
 
   if (roomLoading) {

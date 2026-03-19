@@ -8,6 +8,8 @@ import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { QUERY_KEYS, fetchRooms, fetchRoomTypes, fetchActiveLogs, fetchReservations, fetchPriceChart } from '../api/queries';
 import { notifySuccess, notifyError } from '../api/notify';
+import { parseApiError } from '../api/errorUtils';
+import usePermissions from '../hooks/usePermissions';
 
 function getRoomStatus(roomId, occupiedIds, reservedIds) {
   if (occupiedIds.has(roomId)) return 'occupied';
@@ -24,6 +26,7 @@ const STATUS_CONFIG = {
 export default function RoomDashboard() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const { permissions } = usePermissions();
   const today = new Date().toISOString().slice(0, 10);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -48,7 +51,7 @@ export default function RoomDashboard() {
       addForm.reset();
       notifySuccess('Room created.');
     },
-    onError: () => notifyError('Failed to create room.'),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to create room.')),
   });
 
   const { data: rooms = [], isLoading: roomsLoading } = useQuery({ queryKey: QUERY_KEYS.rooms, queryFn: fetchRooms });
@@ -111,9 +114,11 @@ export default function RoomDashboard() {
           onChange={(e) => setSearch(e.target.value)}
           w={220}
         />
-        <Button leftSection={<IconPlus size={16} />} onClick={() => { addForm.reset(); openAdd(); }}>
-          Add Room
-        </Button>
+        {(permissions.add_rooms || permissions.is_superuser) && (
+          <Button leftSection={<IconPlus size={16} />} onClick={() => { addForm.reset(); openAdd(); }}>
+            Add Room
+          </Button>
+        )}
         <SegmentedControl
           value={statusFilter}
           onChange={setStatusFilter}

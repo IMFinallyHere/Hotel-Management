@@ -4,6 +4,7 @@ import dayjs from 'dayjs';
 import api from '../api/client';
 import { QUERY_KEYS, QUERY_KEYS_OPS, fetchNcRequests } from '../api/queries';
 import { notifySuccess, notifyError } from '../api/notify';
+import { parseApiError } from '../api/errorUtils';
 import usePermissions from '../hooks/usePermissions';
 
 const STATUS_COLORS = { pending: 'orange', approved: 'green', rejected: 'red' };
@@ -11,7 +12,7 @@ const STATUS_COLORS = { pending: 'orange', approved: 'green', rejected: 'red' };
 export default function NCRequests() {
   const qc = useQueryClient();
   const { permissions } = usePermissions();
-  const isAdmin = permissions.is_superuser;
+  const canApprove = permissions.change_roomncrequest || permissions.is_superuser;
 
   const { data: requests = [], isLoading } = useQuery({
     queryKey: QUERY_KEYS_OPS.ncRequests,
@@ -25,7 +26,7 @@ export default function NCRequests() {
       qc.invalidateQueries(QUERY_KEYS.activeLogs);
       notifySuccess('NC request approved.');
     },
-    onError: (e) => notifyError(e.response?.data?.error ?? 'Failed to approve.'),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to approve.')),
   });
 
   const rejectMutation = useMutation({
@@ -34,7 +35,7 @@ export default function NCRequests() {
       qc.invalidateQueries(QUERY_KEYS_OPS.ncRequests);
       notifySuccess('NC request rejected.');
     },
-    onError: (e) => notifyError(e.response?.data?.error ?? 'Failed to reject.'),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to reject.')),
   });
 
   const rows = requests.map((req) => (
@@ -49,7 +50,7 @@ export default function NCRequests() {
       <Table.Td>{dayjs(req.created_on).format('DD MMM YYYY, hh:mm A')}</Table.Td>
       <Table.Td>{req.reviewed_by_name ?? '—'}</Table.Td>
       <Table.Td>
-        {isAdmin && req.status === 'pending' && (
+        {canApprove && req.status === 'pending' && (
           <Group gap="xs">
             <Button size="xs" color="green" variant="light" onClick={() => approveMutation.mutate(req.id)} loading={approveMutation.isPending}>
               Approve
@@ -65,13 +66,14 @@ export default function NCRequests() {
 
   return (
     <>
-      <Group mb="md">
+      <Group mb="md" wrap="wrap">
         <Text fw={600} size="lg">NC (Not Chargeable) Requests</Text>
         <Badge color="orange" variant="light">
           {requests.filter(r => r.status === 'pending').length} pending
         </Badge>
       </Group>
 
+      <Table.ScrollContainer minWidth={700}>
       <Table striped highlightOnHover withTableBorder>
         <Table.Thead>
           <Table.Tr>
@@ -93,6 +95,7 @@ export default function NCRequests() {
           ) : rows}
         </Table.Tbody>
       </Table>
+      </Table.ScrollContainer>
     </>
   );
 }

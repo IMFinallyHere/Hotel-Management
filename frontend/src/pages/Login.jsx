@@ -1,11 +1,13 @@
 import { TextInput, PasswordInput, Button, Paper, Title, Stack, Center } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import api from '../api/client';
 import { notifyError } from '../api/notify';
 
 export default function Login() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const form = useForm({
     initialValues: { username: '', password: '' },
     validate: {
@@ -19,6 +21,7 @@ export default function Login() {
       const { data } = await api.post('auth/token/', values);
       localStorage.setItem('access_token', data.access);
       localStorage.setItem('refresh_token', data.refresh);
+      queryClient.clear();
       navigate('/');
     } catch {
       notifyError('Invalid username or password.');

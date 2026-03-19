@@ -8,9 +8,15 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../api/client';
 import { QUERY_KEYS, fetchConfigurations } from '../api/queries';
 import { notifySuccess, notifyError } from '../api/notify';
+import { parseApiError } from '../api/errorUtils';
+import usePermissions from '../hooks/usePermissions';
 
 export default function Configurations() {
   const qc = useQueryClient();
+  const { permissions } = usePermissions();
+  const canAdd    = permissions.add_configurations    || permissions.is_superuser;
+  const canChange = permissions.change_configurations || permissions.is_superuser;
+  const canDelete = permissions.delete_configurations || permissions.is_superuser;
   const { data = [], isLoading } = useQuery({ queryKey: QUERY_KEYS.configurations, queryFn: fetchConfigurations });
   const [opened, { open, close }] = useDisclosure(false);
   const [editing, setEditing] = useState(null);
@@ -32,13 +38,13 @@ export default function Configurations() {
       ? api.put(`/v1/configurations/${editing.id}/`, values)
       : api.post('/v1/configurations/', values),
     onSuccess: () => { qc.invalidateQueries(QUERY_KEYS.configurations); close(); notifySuccess('Saved.'); },
-    onError: () => notifyError('Failed to save.'),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to save.')),
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id) => api.delete(`/v1/configurations/${id}/`),
     onSuccess: () => { qc.invalidateQueries(QUERY_KEYS.configurations); notifySuccess('Deleted.'); },
-    onError: () => notifyError('Failed to delete.'),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to delete.')),
   });
 
   const handleDelete = (id) => modals.openConfirmModal({
@@ -55,8 +61,8 @@ export default function Configurations() {
       <Table.Td>{cfg.value ?? '—'}</Table.Td>
       <Table.Td>
         <Group gap="xs">
-          <Button size="xs" variant="light" onClick={() => openEdit(cfg)}>Edit</Button>
-          <Button size="xs" color="red" variant="light" onClick={() => handleDelete(cfg.id)}>Delete</Button>
+          {canChange && <Button size="xs" variant="light" onClick={() => openEdit(cfg)}>Edit</Button>}
+          {canDelete && <Button size="xs" color="red" variant="light" onClick={() => handleDelete(cfg.id)}>Delete</Button>}
         </Group>
       </Table.Td>
     </Table.Tr>
@@ -65,7 +71,7 @@ export default function Configurations() {
   return (
     <>
       <Group mb="md">
-        <Button leftSection={<IconPlus size={16} />} onClick={openAdd}>Add Configuration</Button>
+        {canAdd && <Button leftSection={<IconPlus size={16} />} onClick={openAdd}>Add Configuration</Button>}
       </Group>
 
       <Table striped highlightOnHover withTableBorder>

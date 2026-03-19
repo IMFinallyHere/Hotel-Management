@@ -8,6 +8,7 @@ import dayjs from 'dayjs';
 import api from '../api/client';
 import { QUERY_KEYS, QUERY_KEYS_OPS, fetchActiveLogs, fetchRooms, fetchAmenities, fetchGroupCustomers } from '../api/queries';
 import { notifySuccess, notifyError } from '../api/notify';
+import { parseApiError } from '../api/errorUtils';
 
 // ── Customer chips (badges that open detail modal) ──────────────────────────
 
@@ -112,7 +113,7 @@ export default function Checkout() {
       qc.invalidateQueries(QUERY_KEYS.rooms);
       notifySuccess('Checkout successful.');
     },
-    onError: (e) => notifyError(e.response?.data?.error ?? 'Checkout failed.'),
+    onError: (e) => notifyError(parseApiError(e, 'Checkout failed.')),
   });
 
   const addAmenityMutation = useMutation({
@@ -123,7 +124,7 @@ export default function Checkout() {
       setNewAmenityQty(1);
       notifySuccess('Amenity added.');
     },
-    onError: (e) => notifyError(e.response?.data?.non_field_errors?.[0] ?? e.response?.data?.amenity?.[0] ?? 'Failed to add amenity.'),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to add amenity.')),
   });
 
   const removeAmenityMutation = useMutation({
@@ -132,7 +133,7 @@ export default function Checkout() {
       qc.invalidateQueries(QUERY_KEYS.activeLogs);
       notifySuccess('Amenity removed.');
     },
-    onError: () => notifyError('Failed to remove amenity.'),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to remove amenity.')),
   });
 
   const addPaymentMutation = useMutation({
@@ -145,7 +146,7 @@ export default function Checkout() {
       setNewPaymentNote('');
       notifySuccess('Payment recorded.');
     },
-    onError: () => notifyError('Failed to record payment.'),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to record payment.')),
   });
 
   const removePaymentMutation = useMutation({
@@ -154,7 +155,7 @@ export default function Checkout() {
       qc.invalidateQueries(QUERY_KEYS.activeLogs);
       notifySuccess('Payment removed.');
     },
-    onError: () => notifyError('Failed to remove payment.'),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to remove payment.')),
   });
 
   const createNcMutation = useMutation({
@@ -166,7 +167,7 @@ export default function Checkout() {
       setNcReason('');
       notifySuccess('NC request submitted.');
     },
-    onError: () => notifyError('Failed to submit NC request.'),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to submit NC request.')),
   });
 
   const handleCheckout = (record) => modals.openConfirmModal({

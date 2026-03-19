@@ -1,4 +1,5 @@
-import { AppShell, NavLink, Title, Button, Group } from '@mantine/core';
+import { AppShell, NavLink, Title, Group, Avatar, Text, Burger, Menu, Badge, Box } from '@mantine/core';
+import { useDisclosure } from '@mantine/hooks';
 import {
   IconHome, IconBuildingBank, IconUsers, IconSettings,
   IconLogin, IconLogout, IconCalendar, IconCurrencyRupee,
@@ -43,6 +44,7 @@ import ProfitLoss from './pages/finance/ProfitLoss';
 import StaffSales from './pages/finance/StaffSales';
 import CashReconciliation from './pages/finance/CashReconciliation';
 import ExpenseReport from './pages/finance/ExpenseReport';
+import { useQueryClient } from '@tanstack/react-query';
 import usePermissions from './hooks/usePermissions';
 
 // Force white text on dark sidebar — inline JSX label bypasses Mantine's CSS var cascade
@@ -59,8 +61,11 @@ function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const path = location.pathname;
+  const queryClient = useQueryClient();
+  const [navOpened, { toggle: toggleNav, close: closeNav }] = useDisclosure(false);
 
   const handleLogout = () => {
+    queryClient.clear();
     localStorage.clear();
     navigate('/login');
   };
@@ -71,74 +76,126 @@ function AppLayout() {
   const reportsActive = path.startsWith('/reports');
   const financeActive = path.startsWith('/finance');
   const adminActive = path.startsWith('/admin');
-  const { permissions, hasAnyReport } = usePermissions();
+  const { permissions, username, firstName, lastName, email, hasAnyReport, hasAnyAdmin, hasAnyOps, hasAnySettings } = usePermissions();
   const hasAnyFinance = permissions.view_pl_report || permissions.view_staff_sales_report || permissions.view_cash_reconciliation || permissions.view_expense_report || permissions.is_superuser;
+
+  const initials = firstName
+    ? firstName.slice(0, 2).toUpperCase()
+    : username.slice(0, 2).toUpperCase();
+
+  const fullName = [firstName, lastName].filter(Boolean).join(' ');
+  const roleBadge = permissions.is_superuser
+    ? { label: 'Superuser', color: 'violet' }
+    : permissions.is_staff
+      ? { label: 'Staff', color: 'blue' }
+      : { label: 'User', color: 'teal' };
 
   return (
     <AppShell
-      navbar={{ width: 220, breakpoint: 'sm' }}
+      navbar={{ width: 220, breakpoint: 'sm', collapsed: { mobile: !navOpened } }}
       header={{ height: 60 }}
       padding="md"
     >
       <AppShell.Header>
         <Group h="100%" px="md" justify="space-between">
-          <Title order={4}>Hotel Manager</Title>
-          <Button variant="subtle" leftSection={<IconLogout size={16} />} onClick={handleLogout}>
-            Logout
-          </Button>
+          <Group>
+            <Burger opened={navOpened} onClick={toggleNav} hiddenFrom="sm" size="sm" />
+            <Title order={4}>Hotel Manager</Title>
+          </Group>
+          <Group gap="xs">
+            <Menu shadow="md" width={220} position="bottom-end" withArrow>
+              <Menu.Target>
+                <Avatar size="sm" radius="xl" color="teal" style={{ cursor: 'pointer' }}>
+                  {initials}
+                </Avatar>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Box px="sm" py="xs">
+                  <Group gap="sm" wrap="nowrap">
+                    <Avatar size="md" radius="xl" color="teal">{initials}</Avatar>
+                    <div>
+                      {fullName && <Text size="sm" fw={600} lh={1.3}>{fullName}</Text>}
+                      <Text size="xs" c="dimmed" lh={1.3}>@{username}</Text>
+                      <Badge size="xs" color={roleBadge.color} variant="light" mt={2}>
+                        {roleBadge.label}
+                      </Badge>
+                    </div>
+                  </Group>
+                </Box>
+                <Menu.Divider />
+                <Menu.Item color="red" leftSection={<IconLogout size={14} />} onClick={handleLogout}>
+                  Logout
+                </Menu.Item>
+              </Menu.Dropdown>
+            </Menu>
+          </Group>
         </Group>
       </AppShell.Header>
 
       <AppShell.Navbar p="xs" style={{ background: '#1a1b1e' }}>
+        {hasAnyOps && (
         <NavLink
           {...NL}
           label={nl('Operations')}
           leftSection={<IconCalendar size={16} color="rgba(255,255,255,0.6)" />}
           defaultOpened={operationsActive}
         >
+          {(permissions.view_rooms || permissions.is_superuser) && (
           <NavLink
             {...NL}
             label={nl('All Rooms')}
             leftSection={<IconBuildingBank size={14} color="rgba(255,255,255,0.6)" />}
-            onClick={() => navigate('/rooms')}
+            onClick={() => { navigate('/rooms'); closeNav(); }}
             active={roomsActive}
           />
+          )}
+          {(permissions.view_roomstaylogs || permissions.is_superuser) && (
           <NavLink
             {...NL}
             label={nl('Checkout')}
             leftSection={<IconLogout size={14} color="rgba(255,255,255,0.6)" />}
-            onClick={() => navigate('/checkout')}
+            onClick={() => { navigate('/checkout'); closeNav(); }}
             active={path === '/checkout'}
           />
+          )}
+          {(permissions.view_customers || permissions.is_superuser) && (
           <NavLink
             {...NL}
             label={nl('Customers')}
             leftSection={<IconUsers size={14} color="rgba(255,255,255,0.6)" />}
-            onClick={() => navigate('/customers')}
+            onClick={() => { navigate('/customers'); closeNav(); }}
             active={path === '/customers'}
           />
+          )}
+          {(permissions.view_expense || permissions.is_superuser) && (
           <NavLink
             {...NL}
             label={nl('Expenses')}
             leftSection={<IconReceipt size={14} color="rgba(255,255,255,0.6)" />}
-            onClick={() => navigate('/expenses')}
+            onClick={() => { navigate('/expenses'); closeNav(); }}
             active={path === '/expenses'}
           />
+          )}
+          {(permissions.view_roomncrequest || permissions.is_superuser) && (
           <NavLink
             {...NL}
             label={nl('NC Requests')}
             leftSection={<IconBan size={14} color="rgba(255,255,255,0.6)" />}
-            onClick={() => navigate('/nc-requests')}
+            onClick={() => { navigate('/nc-requests'); closeNav(); }}
             active={path === '/nc-requests'}
           />
+          )}
+          {(permissions.view_cashwithdrawal || permissions.is_superuser) && (
           <NavLink
             {...NL}
             label={nl('Cash Drawer')}
             leftSection={<IconCash size={14} color="rgba(255,255,255,0.6)" />}
-            onClick={() => navigate('/cash-drawer')}
+            onClick={() => { navigate('/cash-drawer'); closeNav(); }}
             active={path === '/cash-drawer'}
           />
+          )}
         </NavLink>
+        )}
 
         {hasAnyReport && (
           <NavLink
@@ -152,7 +209,7 @@ function AppLayout() {
                 {...NL}
                 label={nl("Today's Overview")}
                 leftSection={<IconDashboard size={14} color="rgba(255,255,255,0.6)" />}
-                onClick={() => navigate('/reports/today')}
+                onClick={() => { navigate('/reports/today'); closeNav(); }}
                 active={path === '/reports/today'}
               />
             )}
@@ -161,7 +218,7 @@ function AppLayout() {
                 {...NL}
                 label={nl('Revenue')}
                 leftSection={<IconCurrencyRupee size={14} color="rgba(255,255,255,0.6)" />}
-                onClick={() => navigate('/reports/revenue')}
+                onClick={() => { navigate('/reports/revenue'); closeNav(); }}
                 active={path === '/reports/revenue'}
               />
             )}
@@ -170,7 +227,7 @@ function AppLayout() {
                 {...NL}
                 label={nl('Occupancy')}
                 leftSection={<IconPercentage size={14} color="rgba(255,255,255,0.6)" />}
-                onClick={() => navigate('/reports/occupancy')}
+                onClick={() => { navigate('/reports/occupancy'); closeNav(); }}
                 active={path === '/reports/occupancy'}
               />
             )}
@@ -179,7 +236,7 @@ function AppLayout() {
                 {...NL}
                 label={nl('Guest Analytics')}
                 leftSection={<IconUsersGroup size={14} color="rgba(255,255,255,0.6)" />}
-                onClick={() => navigate('/reports/guests')}
+                onClick={() => { navigate('/reports/guests'); closeNav(); }}
                 active={path === '/reports/guests'}
               />
             )}
@@ -188,7 +245,7 @@ function AppLayout() {
                 {...NL}
                 label={nl('Room Performance')}
                 leftSection={<IconBuildingSkyscraper size={14} color="rgba(255,255,255,0.6)" />}
-                onClick={() => navigate('/reports/room-performance')}
+                onClick={() => { navigate('/reports/room-performance'); closeNav(); }}
                 active={path === '/reports/room-performance'}
               />
             )}
@@ -197,7 +254,7 @@ function AppLayout() {
                 {...NL}
                 label={nl('Reservations')}
                 leftSection={<IconCalendarEvent size={14} color="rgba(255,255,255,0.6)" />}
-                onClick={() => navigate('/reports/reservation-fulfillment')}
+                onClick={() => { navigate('/reports/reservation-fulfillment'); closeNav(); }}
                 active={path === '/reports/reservation-fulfillment'}
               />
             )}
@@ -206,7 +263,7 @@ function AppLayout() {
                 {...NL}
                 label={nl('Customer Value')}
                 leftSection={<IconHeartHandshake size={14} color="rgba(255,255,255,0.6)" />}
-                onClick={() => navigate('/reports/clv')}
+                onClick={() => { navigate('/reports/clv'); closeNav(); }}
                 active={path === '/reports/clv'}
               />
             )}
@@ -215,7 +272,7 @@ function AppLayout() {
                 {...NL}
                 label={nl('Trends')}
                 leftSection={<IconTrendingUp size={14} color="rgba(255,255,255,0.6)" />}
-                onClick={() => navigate('/reports/trends')}
+                onClick={() => { navigate('/reports/trends'); closeNav(); }}
                 active={path === '/reports/trends'}
               />
             )}
@@ -224,7 +281,7 @@ function AppLayout() {
                 {...NL}
                 label={nl('Stay Duration')}
                 leftSection={<IconClock size={14} color="rgba(255,255,255,0.6)" />}
-                onClick={() => navigate('/reports/stay-duration')}
+                onClick={() => { navigate('/reports/stay-duration'); closeNav(); }}
                 active={path === '/reports/stay-duration'}
               />
             )}
@@ -233,7 +290,7 @@ function AppLayout() {
                 {...NL}
                 label={nl('Extra Beds')}
                 leftSection={<IconBedFilled size={14} color="rgba(255,255,255,0.6)" />}
-                onClick={() => navigate('/reports/upsell')}
+                onClick={() => { navigate('/reports/upsell'); closeNav(); }}
                 active={path === '/reports/upsell'}
               />
             )}
@@ -242,7 +299,7 @@ function AppLayout() {
                 {...NL}
                 label={nl('Pipeline')}
                 leftSection={<IconTimeline size={14} color="rgba(255,255,255,0.6)" />}
-                onClick={() => navigate('/reports/pipeline')}
+                onClick={() => { navigate('/reports/pipeline'); closeNav(); }}
                 active={path === '/reports/pipeline'}
               />
             )}
@@ -261,7 +318,7 @@ function AppLayout() {
                 {...NL}
                 label={nl('Revenue & P&L')}
                 leftSection={<IconScale size={14} color="rgba(255,255,255,0.6)" />}
-                onClick={() => navigate('/finance/pl')}
+                onClick={() => { navigate('/finance/pl'); closeNav(); }}
                 active={path === '/finance/pl'}
               />
             )}
@@ -270,7 +327,7 @@ function AppLayout() {
                 {...NL}
                 label={nl('Staff Sales')}
                 leftSection={<IconUsers size={14} color="rgba(255,255,255,0.6)" />}
-                onClick={() => navigate('/finance/staff-sales')}
+                onClick={() => { navigate('/finance/staff-sales'); closeNav(); }}
                 active={path === '/finance/staff-sales'}
               />
             )}
@@ -279,7 +336,7 @@ function AppLayout() {
                 {...NL}
                 label={nl('Cash Reconciliation')}
                 leftSection={<IconCash size={14} color="rgba(255,255,255,0.6)" />}
-                onClick={() => navigate('/finance/cash-reconciliation')}
+                onClick={() => { navigate('/finance/cash-reconciliation'); closeNav(); }}
                 active={path === '/finance/cash-reconciliation'}
               />
             )}
@@ -288,84 +345,102 @@ function AppLayout() {
                 {...NL}
                 label={nl('Expense Report')}
                 leftSection={<IconReceipt size={14} color="rgba(255,255,255,0.6)" />}
-                onClick={() => navigate('/finance/expense-report')}
+                onClick={() => { navigate('/finance/expense-report'); closeNav(); }}
                 active={path === '/finance/expense-report'}
               />
             )}
           </NavLink>
         )}
 
+        {hasAnySettings && (
         <NavLink
           {...NL}
           label={nl('Settings')}
           leftSection={<IconSettings size={16} color="rgba(255,255,255,0.6)" />}
           defaultOpened={configActive}
         >
+          {(permissions.view_roomtype || permissions.is_superuser) && (
           <NavLink
             {...NL}
             label={nl('Room Types')}
             leftSection={<IconHome size={14} color="rgba(255,255,255,0.6)" />}
-            onClick={() => navigate('/room-types')}
+            onClick={() => { navigate('/room-types'); closeNav(); }}
             active={path === '/room-types'}
           />
+          )}
+          {(permissions.view_roomspricechart || permissions.is_superuser) && (
           <NavLink
             {...NL}
             label={nl('Price Chart')}
             leftSection={<IconCurrencyRupee size={14} color="rgba(255,255,255,0.6)" />}
-            onClick={() => navigate('/price-chart')}
+            onClick={() => { navigate('/price-chart'); closeNav(); }}
             active={path === '/price-chart'}
           />
+          )}
+          {(permissions.view_countrycodes || permissions.is_superuser) && (
           <NavLink
             {...NL}
             label={nl('Country Codes')}
             leftSection={<IconWorld size={14} color="rgba(255,255,255,0.6)" />}
-            onClick={() => navigate('/country-codes')}
+            onClick={() => { navigate('/country-codes'); closeNav(); }}
             active={path === '/country-codes'}
           />
+          )}
+          {(permissions.view_amenity || permissions.is_superuser) && (
           <NavLink
             {...NL}
             label={nl('Amenities')}
             leftSection={<IconPackage size={14} color="rgba(255,255,255,0.6)" />}
-            onClick={() => navigate('/amenities')}
+            onClick={() => { navigate('/amenities'); closeNav(); }}
             active={path === '/amenities'}
           />
+          )}
+          {(permissions.view_configurations || permissions.is_superuser) && (
           <NavLink
             {...NL}
             label={nl('Configurations')}
             leftSection={<IconSettings size={14} color="rgba(255,255,255,0.6)" />}
-            onClick={() => navigate('/configurations')}
+            onClick={() => { navigate('/configurations'); closeNav(); }}
             active={path === '/configurations'}
           />
+          )}
         </NavLink>
+        )}
 
-        {permissions.is_superuser && (
+        {hasAnyAdmin && (
           <NavLink
             {...NL}
             label={nl('Administration')}
             leftSection={<IconShieldLock size={16} color="rgba(255,255,255,0.6)" />}
             defaultOpened={adminActive}
           >
-            <NavLink
-              {...NL}
-              label={nl('Users')}
-              leftSection={<IconUserCog size={14} color="rgba(255,255,255,0.6)" />}
-              onClick={() => navigate('/admin/users')}
-              active={path === '/admin/users'}
-            />
-            <NavLink
-              {...NL}
-              label={nl('Groups')}
-              leftSection={<IconUsersGroup size={14} color="rgba(255,255,255,0.6)" />}
-              onClick={() => navigate('/admin/groups')}
-              active={path === '/admin/groups'}
-            />
-            <NavLink
-              {...NL}
-              label={nl('Permissions')}
-              leftSection={<IconLock size={14} color="rgba(255,255,255,0.6)" />}
-              onClick={() => navigate('/admin/permissions')}
-              active={path === '/admin/permissions'}
-            />
+            {(permissions.view_user || permissions.is_superuser) && (
+              <NavLink
+                {...NL}
+                label={nl('Users')}
+                leftSection={<IconUserCog size={14} color="rgba(255,255,255,0.6)" />}
+                onClick={() => { navigate('/admin/users'); closeNav(); }}
+                active={path === '/admin/users'}
+              />
+            )}
+            {(permissions.view_group || permissions.is_superuser) && (
+              <NavLink
+                {...NL}
+                label={nl('Groups')}
+                leftSection={<IconUsersGroup size={14} color="rgba(255,255,255,0.6)" />}
+                onClick={() => { navigate('/admin/groups'); closeNav(); }}
+                active={path === '/admin/groups'}
+              />
+            )}
+            {(permissions.view_group || permissions.is_superuser) && (
+              <NavLink
+                {...NL}
+                label={nl('Permissions')}
+                leftSection={<IconLock size={14} color="rgba(255,255,255,0.6)" />}
+                onClick={() => { navigate('/admin/permissions'); closeNav(); }}
+                active={path === '/admin/permissions'}
+              />
+            )}
           </NavLink>
         )}
       </AppShell.Navbar>

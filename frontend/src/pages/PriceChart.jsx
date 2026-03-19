@@ -10,9 +10,15 @@ import dayjs from 'dayjs';
 import api from '../api/client';
 import { QUERY_KEYS, fetchPriceChart, fetchRooms } from '../api/queries';
 import { notifySuccess, notifyError } from '../api/notify';
+import { parseApiError } from '../api/errorUtils';
+import usePermissions from '../hooks/usePermissions';
 
 export default function PriceChart() {
   const qc = useQueryClient();
+  const { permissions } = usePermissions();
+  const canAdd    = permissions.add_roomspricechart    || permissions.is_superuser;
+  const canChange = permissions.change_roomspricechart || permissions.is_superuser;
+  const canDelete = permissions.delete_roomspricechart || permissions.is_superuser;
   const { data = [], isLoading } = useQuery({ queryKey: QUERY_KEYS.priceChart, queryFn: fetchPriceChart });
   const { data: rooms = [] } = useQuery({ queryKey: QUERY_KEYS.rooms, queryFn: fetchRooms });
   const [opened, { open, close }] = useDisclosure(false);
@@ -53,8 +59,8 @@ export default function PriceChart() {
         qc.invalidateQueries({ queryKey: QUERY_KEYS.priceChart });
         close();
         notifySuccess('Saved.');
-      } catch {
-        notifyError('Failed to save.');
+      } catch (e) {
+        notifyError(parseApiError(e, 'Failed to save.'));
       } finally {
         setSaving(false);
       }
@@ -92,7 +98,7 @@ export default function PriceChart() {
   const deleteMutation = useMutation({
     mutationFn: (id) => api.delete(`/v1/price/chart/${id}/`),
     onSuccess: () => { qc.invalidateQueries(QUERY_KEYS.priceChart); notifySuccess('Deleted.'); },
-    onError: () => notifyError('Failed to delete.'),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to delete.')),
   });
 
   const handleDelete = (id) => modals.openConfirmModal({
@@ -121,8 +127,8 @@ export default function PriceChart() {
         <Table.Td>
           {!isPast ? (
             <Group gap="xs">
-              <Button size="xs" variant="light" onClick={() => openEdit(entry)}>Edit</Button>
-              <Button size="xs" color="red" variant="light" onClick={() => handleDelete(entry.id)}>Delete</Button>
+              {canChange && <Button size="xs" variant="light" onClick={() => openEdit(entry)}>Edit</Button>}
+              {canDelete && <Button size="xs" color="red" variant="light" onClick={() => handleDelete(entry.id)}>Delete</Button>}
             </Group>
           ) : (
             <Text size="xs" c="dimmed">—</Text>
@@ -135,10 +141,10 @@ export default function PriceChart() {
   return (
     <>
       <Group mb="md">
-        <Button leftSection={<IconPlus size={16} />} onClick={openAdd}>Add Price Entry</Button>
+        {canAdd && <Button leftSection={<IconPlus size={16} />} onClick={openAdd}>Add Price Entry</Button>}
       </Group>
 
-      <Group mb="sm" align="flex-end">
+      <Group mb="sm" align="flex-end" wrap="wrap">
         <Select
           placeholder="Filter by room"
           data={rooms.map(r => ({ value: String(r.id), label: r.room_number }))}
@@ -157,6 +163,7 @@ export default function PriceChart() {
         <Text size="sm" c="dimmed">Showing {filtered.length} of {data.length} entries</Text>
       </Group>
 
+      <Table.ScrollContainer minWidth={500}>
       <Table striped highlightOnHover withTableBorder>
         <Table.Thead>
           <Table.Tr>
@@ -174,8 +181,9 @@ export default function PriceChart() {
           ) : rows}
         </Table.Tbody>
       </Table>
+      </Table.ScrollContainer>
 
-      <Modal opened={opened} onClose={close} title={editing ? 'Edit Price Entry' : 'Add Price Entry'}>
+      <Modal opened={opened} onClose={close} title={editing ? 'Edit Price Entry' : 'Add Price Entry'} size={{ base: '95%', sm: 'lg' }}>
         <form onSubmit={form.onSubmit(handleSave)}>
           <Select
             label="Room"

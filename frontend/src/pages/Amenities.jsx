@@ -8,9 +8,15 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../api/client';
 import { QUERY_KEYS, fetchAmenities } from '../api/queries';
 import { notifySuccess, notifyError } from '../api/notify';
+import { parseApiError } from '../api/errorUtils';
+import usePermissions from '../hooks/usePermissions';
 
 export default function Amenities() {
   const qc = useQueryClient();
+  const { permissions } = usePermissions();
+  const canAdd    = permissions.add_amenity    || permissions.is_superuser;
+  const canChange = permissions.change_amenity || permissions.is_superuser;
+  const canDelete = permissions.delete_amenity || permissions.is_superuser;
   const { data = [], isLoading } = useQuery({ queryKey: QUERY_KEYS.amenities, queryFn: fetchAmenities });
   const [opened, { open, close }] = useDisclosure(false);
   const [editing, setEditing] = useState(null);
@@ -35,13 +41,13 @@ export default function Amenities() {
       ? api.put(`/v1/amenities/${editing.id}/`, values)
       : api.post('/v1/amenities/', values),
     onSuccess: () => { qc.invalidateQueries(QUERY_KEYS.amenities); close(); notifySuccess('Saved.'); },
-    onError: () => notifyError('Failed to save.'),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to save.')),
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id) => api.delete(`/v1/amenities/${id}/`),
     onSuccess: () => { qc.invalidateQueries(QUERY_KEYS.amenities); notifySuccess('Deleted.'); },
-    onError: () => notifyError('Failed to delete. Amenity may be in use.'),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to delete. Amenity may be in use.')),
   });
 
   const handleDelete = (id) => modals.openConfirmModal({
@@ -63,8 +69,8 @@ export default function Amenities() {
       </Table.Td>
       <Table.Td>
         <Group gap="xs">
-          <Button size="xs" variant="light" onClick={() => openEdit(item)}>Edit</Button>
-          <Button size="xs" color="red" variant="light" onClick={() => handleDelete(item.id)}>Delete</Button>
+          {canChange && <Button size="xs" variant="light" onClick={() => openEdit(item)}>Edit</Button>}
+          {canDelete && <Button size="xs" color="red" variant="light" onClick={() => handleDelete(item.id)}>Delete</Button>}
         </Group>
       </Table.Td>
     </Table.Tr>
@@ -73,9 +79,10 @@ export default function Amenities() {
   return (
     <>
       <Group mb="md">
-        <Button leftSection={<IconPlus size={16} />} onClick={openAdd}>Add Amenity</Button>
+        {canAdd && <Button leftSection={<IconPlus size={16} />} onClick={openAdd}>Add Amenity</Button>}
       </Group>
 
+      <Table.ScrollContainer minWidth={500}>
       <Table striped highlightOnHover withTableBorder>
         <Table.Thead>
           <Table.Tr>
@@ -93,8 +100,9 @@ export default function Amenities() {
           ) : rows}
         </Table.Tbody>
       </Table>
+      </Table.ScrollContainer>
 
-      <Modal opened={opened} onClose={close} title={editing ? 'Edit Amenity' : 'Add Amenity'}>
+      <Modal opened={opened} onClose={close} title={editing ? 'Edit Amenity' : 'Add Amenity'} size={{ base: '95%', sm: 'lg' }}>
         <form onSubmit={form.onSubmit(v => saveMutation.mutate(v))}>
           <TextInput label="Name" {...form.getInputProps('name')} mb="sm" required />
           <NumberInput label="Price" {...form.getInputProps('price')} mb="sm" min={0} required />

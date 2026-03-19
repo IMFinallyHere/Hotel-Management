@@ -8,6 +8,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../api/client';
 import { QUERY_KEYS, fetchGroups, fetchPermissions } from '../api/queries';
 import { notifySuccess, notifyError } from '../api/notify';
+import { parseApiError } from '../api/errorUtils';
+import usePermissions from '../hooks/usePermissions';
 
 function groupPermissionsByCategory(permissions) {
   const categories = {};
@@ -21,6 +23,10 @@ function groupPermissionsByCategory(permissions) {
 
 export default function GroupManagement() {
   const qc = useQueryClient();
+  const { permissions } = usePermissions();
+  const canAdd    = permissions.add_group    || permissions.is_superuser;
+  const canChange = permissions.change_group || permissions.is_superuser;
+  const canDelete = permissions.delete_group || permissions.is_superuser;
   const { data: groups = [], isLoading } = useQuery({ queryKey: QUERY_KEYS.groups, queryFn: fetchGroups });
   const { data: allPermissions = [] } = useQuery({ queryKey: QUERY_KEYS.permissions, queryFn: fetchPermissions });
   const [opened, { open, close }] = useDisclosure(false);
@@ -51,13 +57,13 @@ export default function GroupManagement() {
         : api.post('/v1/groups/', payload);
     },
     onSuccess: () => { qc.invalidateQueries(QUERY_KEYS.groups); close(); notifySuccess('Group saved.'); },
-    onError: () => notifyError('Failed to save group.'),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to save group.')),
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id) => api.delete(`/v1/groups/${id}/`),
     onSuccess: () => { qc.invalidateQueries(QUERY_KEYS.groups); notifySuccess('Group deleted.'); },
-    onError: () => notifyError('Failed to delete group.'),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to delete group.')),
   });
 
   const handleDelete = (group) => modals.openConfirmModal({
@@ -91,8 +97,8 @@ export default function GroupManagement() {
       <Table.Td><Badge variant="light">{g.permissions.length}</Badge></Table.Td>
       <Table.Td>
         <Group gap="xs">
-          <Button size="xs" variant="light" onClick={() => openEdit(g)}>Edit</Button>
-          <Button size="xs" color="red" variant="light" onClick={() => handleDelete(g)}>Delete</Button>
+          {canChange && <Button size="xs" variant="light" onClick={() => openEdit(g)}>Edit</Button>}
+          {canDelete && <Button size="xs" color="red" variant="light" onClick={() => handleDelete(g)}>Delete</Button>}
         </Group>
       </Table.Td>
     </Table.Tr>
@@ -101,9 +107,10 @@ export default function GroupManagement() {
   return (
     <>
       <Group mb="md">
-        <Button leftSection={<IconPlus size={16} />} onClick={openAdd}>Add Group</Button>
+        {canAdd && <Button leftSection={<IconPlus size={16} />} onClick={openAdd}>Add Group</Button>}
       </Group>
 
+      <Table.ScrollContainer minWidth={500}>
       <Table striped highlightOnHover withTableBorder>
         <Table.Thead>
           <Table.Tr>
@@ -121,8 +128,9 @@ export default function GroupManagement() {
           ) : rows}
         </Table.Tbody>
       </Table>
+      </Table.ScrollContainer>
 
-      <Modal opened={opened} onClose={close} title={editing ? 'Edit Group' : 'Add Group'} size="xl">
+      <Modal opened={opened} onClose={close} title={editing ? 'Edit Group' : 'Add Group'} size={{ base: '95%', sm: 'xl' }}>
         <form onSubmit={form.onSubmit(v => saveMutation.mutate(v))}>
           <TextInput label="Name" {...form.getInputProps('name')} mb="md" required />
 
