@@ -80,6 +80,8 @@ jobs:
             fi
 
             if [ "${{ needs.detect-changes.outputs.frontend }}" = "true" ]; then
+              export NVM_DIR="$HOME/.nvm"
+              [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
               cd frontend
               if [ "${{ needs.detect-changes.outputs.npm_deps }}" = "true" ]; then
                 npm install
