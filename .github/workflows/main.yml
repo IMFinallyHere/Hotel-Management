@@ -1,0 +1,88 @@
+name: Production Push
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      backend:      ${{ steps.changes.outputs.backend }}
+      frontend:     ${{ steps.changes.outputs.frontend }}
+      requirements: ${{ steps.changes.outputs.requirements }}
+      npm_deps:     ${{ steps.changes.outputs.npm_deps }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changes
+        id: changes
+        run: |
+          BEFORE="${{ github.event.before }}"
+
+          # workflow_dispatch or first push to branch → full deploy
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || \
+             [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            echo "backend=true"      >> $GITHUB_OUTPUT
+            echo "frontend=true"     >> $GITHUB_OUTPUT
+            echo "requirements=true" >> $GITHUB_OUTPUT
+            echo "npm_deps=true"     >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          CHANGED=$(git diff --name-only "$BEFORE" "${{ github.sha }}")
+
+          BACKEND=$(echo "$CHANGED"      | grep -v '^frontend/' | grep -c '.' || true)
+          FRONTEND=$(echo "$CHANGED"     | grep -c '^frontend/'              || true)
+          REQUIREMENTS=$(echo "$CHANGED" | grep -c '^requirements\.txt$'    || true)
+          NPM=$(echo "$CHANGED"          | grep -c '^frontend/package'       || true)
+
+          [ "$BACKEND"      -gt 0 ] && echo "backend=true"      >> $GITHUB_OUTPUT || echo "backend=false"      >> $GITHUB_OUTPUT
+          [ "$FRONTEND"     -gt 0 ] && echo "frontend=true"     >> $GITHUB_OUTPUT || echo "frontend=false"     >> $GITHUB_OUTPUT
+          [ "$REQUIREMENTS" -gt 0 ] && echo "requirements=true" >> $GITHUB_OUTPUT || echo "requirements=false" >> $GITHUB_OUTPUT
+          [ "$NPM"          -gt 0 ] && echo "npm_deps=true"     >> $GITHUB_OUTPUT || echo "npm_deps=false"     >> $GITHUB_OUTPUT
+
+  deploy:
+    needs: detect-changes
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy
+        uses: appleboy/ssh-action@v1
+        with:
+          host: '${{ vars.HOST }}'
+          username: 'root'
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            cd /var/www/code
+            git pull
+
+            if [ "${{ needs.detect-changes.outputs.backend }}" = "true" ]; then
+              source venv/bin/activate
+              if [ "${{ needs.detect-changes.outputs.requirements }}" = "true" ]; then
+                pip install -r requirements.txt
+              fi
+              python manage.py migrate
+              systemctl restart gunicorn
+              systemctl is-active --quiet gunicorn || { echo "Gunicorn failed to start"; exit 1; }
+            fi
+
+            if [ "${{ needs.detect-changes.outputs.frontend }}" = "true" ]; then
+              cd frontend
+              if [ "${{ needs.detect-changes.outputs.npm_deps }}" = "true" ]; then
+                npm install
+              fi
+              npm run build
+            fi
