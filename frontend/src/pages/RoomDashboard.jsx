@@ -6,18 +6,21 @@ import { IconSearch, IconPlus } from '@tabler/icons-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
-import { QUERY_KEYS, fetchRooms, fetchRoomTypes, fetchActiveLogs, fetchReservations, fetchPriceChart } from '../api/queries';
+import { QUERY_KEYS, fetchRooms, fetchRoomTypes, fetchActiveLogs, fetchReservations, fetchPriceChart, fetchConfigurations } from '../api/queries';
 import { notifySuccess, notifyError } from '../api/notify';
 import { parseApiError } from '../api/errorUtils';
 import usePermissions from '../hooks/usePermissions';
+import { parseConfigs, isLogOvertime } from '../utils/configUtils';
 
-function getRoomStatus(roomId, occupiedIds, reservedIds) {
+function getRoomStatus(roomId, occupiedIds, reservedIds, overtimeIds) {
+  if (overtimeIds.has(roomId)) return 'overtime';
   if (occupiedIds.has(roomId)) return 'occupied';
   if (reservedIds.has(roomId)) return 'reserved';
   return 'available';
 }
 
 const STATUS_CONFIG = {
+  overtime:  { color: 'yellow', label: 'Overtime' },
   occupied:  { color: 'red',    label: 'Occupied' },
   reserved:  { color: 'orange', label: 'Reserved' },
   available: { color: 'teal',   label: 'Available' },
@@ -59,9 +62,11 @@ export default function RoomDashboard() {
   const { data: activeLogs = [] } = useQuery({ queryKey: QUERY_KEYS.activeLogs, queryFn: fetchActiveLogs });
   const { data: reservations = [] } = useQuery({ queryKey: QUERY_KEYS.reservations, queryFn: fetchReservations });
   const { data: priceChart = [] } = useQuery({ queryKey: QUERY_KEYS.priceChart, queryFn: fetchPriceChart });
+  const { data: configs = [] } = useQuery({ queryKey: QUERY_KEYS.configurations, queryFn: fetchConfigurations });
 
   const roomTypeMap = Object.fromEntries(roomTypes.map(t => [t.id, t.name]));
   const occupiedIds = new Set(activeLogs.map(l => l.room));
+  const overtimeIds = new Set(activeLogs.filter(l => isLogOvertime(l)).map(l => l.room));
 
   // roomId → today's chart price
   const todayPriceMap = Object.fromEntries(
@@ -79,7 +84,7 @@ export default function RoomDashboard() {
 
   const filteredRooms = rooms.filter(room => {
     if (search && !room.room_number.toLowerCase().includes(search.toLowerCase())) return false;
-    if (statusFilter !== 'all' && getRoomStatus(room.id, occupiedIds, reservedIds) !== statusFilter) return false;
+    if (statusFilter !== 'all' && getRoomStatus(room.id, occupiedIds, reservedIds, overtimeIds) !== statusFilter) return false;
     return true;
   });
 
@@ -96,7 +101,8 @@ export default function RoomDashboard() {
             {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (
               <Badge key={key} color={cfg.color} variant="light" size="lg">
                 {cfg.label}: {
-                  key === 'occupied' ? occupiedIds.size
+                  key === 'overtime' ? overtimeIds.size
+                  : key === 'occupied' ? [...occupiedIds].filter(id => !overtimeIds.has(id)).length
                   : key === 'reserved' ? [...reservedIds].filter(id => !occupiedIds.has(id)).length
                   : rooms.filter(r => !occupiedIds.has(r.id) && !reservedIds.has(r.id)).length
                 }
@@ -127,13 +133,14 @@ export default function RoomDashboard() {
             { value: 'available', label: 'Available' },
             { value: 'reserved', label: 'Reserved' },
             { value: 'occupied', label: 'Occupied' },
+            { value: 'overtime', label: 'Overtime' },
           ]}
         />
       </Group>
 
       <SimpleGrid cols={{ base: 2, sm: 3, md: 4, lg: 5 }}>
         {filteredRooms.map(room => {
-          const status = getRoomStatus(room.id, occupiedIds, reservedIds);
+          const status = getRoomStatus(room.id, occupiedIds, reservedIds, overtimeIds);
           const cfg = STATUS_CONFIG[status];
           const todayPrice = todayPriceMap[room.id];
           const occupiedPrice = occupiedPriceMap[room.id];

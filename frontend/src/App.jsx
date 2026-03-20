@@ -44,6 +44,8 @@ import ProfitLoss from './pages/finance/ProfitLoss';
 import StaffSales from './pages/finance/StaffSales';
 import CashReconciliation from './pages/finance/CashReconciliation';
 import ExpenseReport from './pages/finance/ExpenseReport';
+import History from './pages/History';
+import GSTReport from './pages/GSTReport';
 import { useQueryClient } from '@tanstack/react-query';
 import usePermissions from './hooks/usePermissions';
 
@@ -71,7 +73,7 @@ function AppLayout() {
   };
 
   const roomsActive = path === '/rooms' || path.startsWith('/rooms/');
-  const operationsActive = roomsActive || path === '/checkout' || path === '/customers' || path === '/nc-requests' || path === '/cash-drawer' || path === '/expenses';
+  const operationsActive = roomsActive || path === '/checkout' || path === '/customers' || path === '/nc-requests' || path === '/cash-drawer' || path === '/expenses' || path === '/history';
   const configActive = ['/configurations', '/amenities', '/room-types', '/price-chart', '/country-codes'].includes(path);
   const reportsActive = path.startsWith('/reports');
   const financeActive = path.startsWith('/finance');
@@ -194,6 +196,15 @@ function AppLayout() {
             active={path === '/cash-drawer'}
           />
           )}
+          {(permissions.view_roomstaylogs || permissions.is_superuser) && (
+          <NavLink
+            {...NL}
+            label={nl('Stay History')}
+            leftSection={<IconTimeline size={14} color="rgba(255,255,255,0.6)" />}
+            onClick={() => { navigate('/history'); closeNav(); }}
+            active={path === '/history'}
+          />
+          )}
         </NavLink>
         )}
 
@@ -301,6 +312,15 @@ function AppLayout() {
                 leftSection={<IconTimeline size={14} color="rgba(255,255,255,0.6)" />}
                 onClick={() => { navigate('/reports/pipeline'); closeNav(); }}
                 active={path === '/reports/pipeline'}
+              />
+            )}
+            {permissions.view_revenue_report && (
+              <NavLink
+                {...NL}
+                label={nl('GST Report')}
+                leftSection={<IconPercentage size={14} color="rgba(255,255,255,0.6)" />}
+                onClick={() => { navigate('/reports/gst'); closeNav(); }}
+                active={path === '/reports/gst'}
               />
             )}
           </NavLink>
@@ -476,6 +496,8 @@ function AppLayout() {
           <Route path="/finance/staff-sales" element={<StaffSales />} />
           <Route path="/finance/cash-reconciliation" element={<CashReconciliation />} />
           <Route path="/finance/expense-report" element={<ExpenseReport />} />
+          <Route path="/history" element={<History />} />
+          <Route path="/reports/gst" element={<GSTReport />} />
           <Route path="/admin/users" element={<UserManagement />} />
           <Route path="/admin/groups" element={<GroupManagement />} />
           <Route path="/admin/permissions" element={<PermissionOverview />} />

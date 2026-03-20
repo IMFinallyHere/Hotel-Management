@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
   Tabs, Table, Card, Button, Badge, Stack, Group, Text, Loader, Center,
-  NumberInput, TextInput, Select, Modal, Alert, ActionIcon, Textarea,
+  NumberInput, TextInput, Select, Modal, Alert, ActionIcon, Textarea, SegmentedControl, Checkbox,
 } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
 import { useForm } from '@mantine/form';
@@ -14,12 +14,13 @@ import dayjs from 'dayjs';
 import api from '../api/client';
 import {
   QUERY_KEYS, QUERY_KEYS_OPS,
-  fetchRoom, fetchActiveLogs, fetchRoomTypes, fetchRoomReservations,
-  fetchGroupCustomers, fetchAmenities,
+  fetchRoom, fetchRooms, fetchActiveLogs, fetchRoomTypes, fetchRoomReservations,
+  fetchGroupCustomers, fetchAmenities, fetchConfigurations,
 } from '../api/queries';
 import { notifySuccess, notifyError } from '../api/notify';
 import { parseApiError } from '../api/errorUtils';
 import CustomerSelectWithAdd from '../components/CustomerSelectWithAdd';
+import { parseConfigs, isLogOvertime, computeOvertimeFee, computeGst } from '../utils/configUtils';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -165,8 +166,21 @@ function StatusTab({ room, activeLogs, isReservedToday }) {
   const [ncOpened, { open: openNc, close: closeNc }] = useDisclosure(false);
   const [ncReason, setNcReason] = useState('');
 
+  // Extend Stay modal
+  const [extendOpened, { open: openExtend, close: closeExtend }] = useDisclosure(false);
+  const [extendDate, setExtendDate] = useState(null);
+
+  // Grant Grace modal
+  const [graceOpened, { open: openGrace, close: closeGrace }] = useDisclosure(false);
+  const [graceHours, setGraceHours] = useState('1');
+
+  // Configurations
+  const { data: configs = [] } = useQuery({ queryKey: QUERY_KEYS.configurations, queryFn: fetchConfigurations });
+  const configMap = parseConfigs(configs);
+  const defaultCheckoutTime = configMap['default_checkout_time'] ?? '11:00';
+
   const checkinForm = useForm({
-    initialValues: { customers: [], price: 0, extra_bed: 0, extra_per_bed_price: 0 },
+    initialValues: { customers: [], price: 0, extra_bed: 0, extra_per_bed_price: 0, nights: 1, gst_applied: true },
     validate: { customers: (v) => v.length > 0 ? null : 'Select at least one customer.' },
   });
 
@@ -247,12 +261,16 @@ function StatusTab({ room, activeLogs, isReservedToday }) {
     setSubmitLoading(true);
     try {
       const { data: groupData } = await api.post('/v1/group/customers/', { customers: values.customers.map(Number) });
+      const [h, m] = defaultCheckoutTime.split(':').map(Number);
+      const expectedCheckout = dayjs().add(values.nights, 'day').hour(h).minute(m).second(0).format('YYYY-MM-DDTHH:mm:ss');
       await api.post('/v1/checkin/', {
         room: room.id,
         group: groupData.group_id,
         price: values.price,
         extra_bed: values.extra_bed,
         extra_per_bed_price: values.extra_per_bed_price,
+        expected_checkout: expectedCheckout,
+        gst_applied: values.gst_applied,
       });
       qc.invalidateQueries(QUERY_KEYS.activeLogs);
       qc.invalidateQueries(QUERY_KEYS.rooms);
@@ -279,6 +297,29 @@ function StatusTab({ room, activeLogs, isReservedToday }) {
     onError: (e) => notifyError(parseApiError(e, 'Failed to submit NC request.')),
   });
 
+  // ── Extend Stay ──
+  const extendMutation = useMutation({
+    mutationFn: ({ logId, expected_checkout }) => api.patch(`/v1/stay-logs/${logId}/extend/`, { expected_checkout }),
+    onSuccess: () => {
+      qc.invalidateQueries(QUERY_KEYS.activeLogs);
+      closeExtend();
+      setExtendDate(null);
+      notifySuccess('Stay extended.');
+    },
+    onError: (e) => notifyError(parseApiError(e, 'Failed to extend stay.')),
+  });
+
+  // ── Grant Grace ──
+  const graceMutation = useMutation({
+    mutationFn: ({ logId, hours }) => api.post(`/v1/stay-logs/${logId}/grace/`, { hours }),
+    onSuccess: () => {
+      qc.invalidateQueries(QUERY_KEYS.activeLogs);
+      closeGrace();
+      notifySuccess('Grace period granted.');
+    },
+    onError: (e) => notifyError(parseApiError(e, 'Failed to grant grace period.')),
+  });
+
   // ── Occupied (items 5, 6, 7) ──
   if (activeLog) {
     const nights = Math.max(1, dayjs().diff(dayjs(activeLog.check_in), 'day'));
@@ -286,18 +327,25 @@ function StatusTab({ room, activeLogs, isReservedToday }) {
     const logAmenities = activeLog.amenities || [];
     const amenityCost = logAmenities.reduce((sum, a) =>
       sum + Number(a.price) * a.quantity * (a.charge_type === 'per_night' ? nights : 1), 0);
-    const totalCost = roomCost + amenityCost;
+    const overtimeFee = computeOvertimeFee(activeLog);
+    const gstAmount = computeGst(activeLog, nights, configMap['gst_percent']);
+    const totalCost = activeLog.is_nc ? 0 : (roomCost + amenityCost + overtimeFee + gstAmount);
     const maxBeds = room.beds + activeLog.extra_bed;
     const currentGuestCount = currentGuests.length;
     const canAddGuest = currentGuestCount < maxBeds;
+    const overtime = isLogOvertime(activeLog);
 
     const amenityOptions = allAmenities.map(a => ({
       value: String(a.id),
       label: `${a.name} — ₹${a.price} (${a.charge_type === 'per_night' ? 'Per Night' : 'Flat'})`,
     }));
 
+    const extendMinDate = activeLog.expected_checkout
+      ? dayjs(activeLog.expected_checkout).add(1, 'day').toDate()
+      : dayjs().add(1, 'day').toDate();
+
     return (
-      <Stack gap="sm" maw={600}>
+      <Stack gap="sm">
         <Stack gap={0} maw={400}>
           <DescRow label="Check-In" value={dayjs(activeLog.check_in).format('DD MMM YYYY, hh:mm A')} />
           <DescRow label="Price" value={`₹${activeLog.price}`} />
@@ -309,8 +357,20 @@ function StatusTab({ room, activeLogs, isReservedToday }) {
           {amenityCost > 0 && (
             <DescRow label="Amenities" value={`₹${amenityCost}`} />
           )}
+          <DescRow label="Expected Checkout"
+            value={activeLog.expected_checkout
+              ? dayjs(activeLog.expected_checkout).format('DD MMM YYYY, hh:mm A') : '—'} />
+          {overtime && (
+            <DescRow label="Overtime Fee" value={`₹${overtimeFee}`} />
+          )}
+          {gstAmount > 0 && (
+            <DescRow label={`GST (${configMap['gst_percent']}%)`} value={`₹${gstAmount}`} />
+          )}
           <DescRow label="Total Cost" value={`₹${totalCost}`} />
         </Stack>
+        {activeLog.is_early_checkin && (
+          <Badge color="cyan" variant="light" size="sm">Early Check-In</Badge>
+        )}
         <Group gap="xs">
           <Button size="xs" variant="light" onClick={() => {
             bedsForm.setValues({ extra_bed: activeLog.extra_bed, extra_per_bed_price: Number(activeLog.extra_per_bed_price) });
@@ -324,6 +384,14 @@ function StatusTab({ room, activeLogs, isReservedToday }) {
           <Button size="xs" variant="light" leftSection={<IconPackage size={14} />} onClick={() => { setNewAmenityId(null); setNewAmenityQty(1); openAmenity(); }}>
             Amenities
           </Button>
+          <Button size="xs" variant="light" color="blue" onClick={openExtend}>
+            Extend Stay
+          </Button>
+          {overtime && activeLog.expected_checkout && dayjs(activeLog.expected_checkout).isSame(dayjs(), 'day') && (
+            <Button size="xs" variant="light" color="yellow" onClick={openGrace}>
+              Grant Grace
+            </Button>
+          )}
           {!activeLog.is_nc && (!activeLog.nc_status || activeLog.nc_status.status === 'rejected') && (
             <Button size="xs" variant="light" color="grape" leftSection={<IconBan size={14} />} onClick={() => { setNcReason(''); openNc(); }}>
               Mark NC
@@ -486,6 +554,58 @@ function StatusTab({ room, activeLogs, isReservedToday }) {
             </Group>
           </Stack>
         </Modal>
+
+        {/* Extend Stay Modal */}
+        <Modal opened={extendOpened} onClose={closeExtend} title="Extend Stay">
+          <DatePickerInput
+            label="New Checkout Date"
+            minDate={extendMinDate}
+            value={extendDate}
+            onChange={setExtendDate}
+            mb="md"
+          />
+          <Group justify="flex-end">
+            <Button variant="default" onClick={closeExtend}>Cancel</Button>
+            <Button
+              color="blue"
+              loading={extendMutation.isPending}
+              disabled={!extendDate}
+              onClick={() => {
+                const [h, m] = defaultCheckoutTime.split(':').map(Number);
+                const dt = dayjs(extendDate).hour(h).minute(m).second(0).format('YYYY-MM-DDTHH:mm:ss');
+                extendMutation.mutate({ logId: activeLog.id, expected_checkout: dt });
+              }}
+            >
+              Extend
+            </Button>
+          </Group>
+        </Modal>
+
+        {/* Grant Grace Modal */}
+        <Modal opened={graceOpened} onClose={closeGrace} title="Grant Grace Period">
+          <Text size="sm" c="dimmed" mb="sm">Select how long to pause the overtime clock.</Text>
+          <SegmentedControl
+            fullWidth
+            value={graceHours}
+            onChange={setGraceHours}
+            data={[
+              { value: '1', label: '1 hr' },
+              { value: '2', label: '2 hrs' },
+              { value: '3', label: '3 hrs' },
+            ]}
+            mb="md"
+          />
+          <Group justify="flex-end">
+            <Button variant="default" onClick={closeGrace}>Cancel</Button>
+            <Button
+              color="yellow"
+              loading={graceMutation.isPending}
+              onClick={() => graceMutation.mutate({ logId: activeLog.id, hours: Number(graceHours) })}
+            >
+              Grant
+            </Button>
+          </Group>
+        </Modal>
       </Stack>
     );
   }
@@ -533,6 +653,16 @@ function StatusTab({ room, activeLogs, isReservedToday }) {
         />
         <NumberInput label="Extra Beds" min={0} {...checkinForm.getInputProps('extra_bed')} mb="sm" />
         <NumberInput label="Price per Extra Bed (₹)" min={0} {...checkinForm.getInputProps('extra_per_bed_price')} mb="sm" />
+        <NumberInput label="Nights" min={1} {...checkinForm.getInputProps('nights')} mb="sm" />
+        <Checkbox
+          label={`Apply GST (${configMap['gst_percent'] ?? '0'}%)`}
+          checked={checkinForm.values.gst_applied}
+          onChange={(e) => checkinForm.setFieldValue('gst_applied', e.currentTarget.checked)}
+          mb="sm"
+        />
+        <Text size="xs" c="dimmed" mb="sm">
+          Departure: {dayjs().add(checkinForm.values.nights, 'day').format('DD MMM YYYY')} at {defaultCheckoutTime}
+        </Text>
         <Text size="sm" c={guestExceeded ? 'red' : 'dimmed'} mb="md">
           {guestCount} guest{guestCount !== 1 ? 's' : ''} selected — {room.beds} bed{room.beds !== 1 ? 's' : ''} + {checkinForm.values.extra_bed} extra = max {maxAllowed}
         </Text>
@@ -547,11 +677,12 @@ function StatusTab({ room, activeLogs, isReservedToday }) {
 
 // ── Tab 2: Reservations ────────────────────────────────────────────────────────
 
-function ReservationsTab({ room, reservations, isOccupied }) {
+function ReservationsTab({ room, reservations, isOccupied, configMap = {} }) {
   const qc = useQueryClient();
   const [opened, { open, close }] = useDisclosure(false);
   const [loading, setLoading] = useState(false);
   const [convertingId, setConvertingId] = useState(null);
+  const defaultCheckoutTime = configMap['default_checkout_time'] ?? '11:00';
 
   const form = useForm({
     initialValues: { customers: [], dates: [null, null], price: 0 },
@@ -585,7 +716,8 @@ function ReservationsTab({ room, reservations, isOccupied }) {
     onConfirm: async () => {
       setConvertingId(reservation.id);
       try {
-        await api.post('/v1/checkin/', { room: room.id, group: reservation.group, price: reservation.price });
+        const expectedCheckout = `${reservation.check_out_date}T${defaultCheckoutTime}:00`;
+        await api.post('/v1/checkin/', { room: room.id, group: reservation.group, price: reservation.price, expected_checkout: expectedCheckout });
         await api.delete(`/v1/reservation/${reservation.id}/`);
         qc.invalidateQueries(QUERY_KEYS.activeLogs);
         qc.invalidateQueries(QUERY_KEYS.rooms);
@@ -759,6 +891,9 @@ export default function RoomDetail() {
     queryKey: QUERY_KEYS.roomReservations(id),
     queryFn: () => fetchRoomReservations(id),
   });
+  const { data: configs = [] } = useQuery({ queryKey: QUERY_KEYS.configurations, queryFn: fetchConfigurations });
+  const configMap = parseConfigs(configs);
+  const { data: allRooms = [] } = useQuery({ queryKey: QUERY_KEYS.rooms, queryFn: fetchRooms });
 
   const checkoutMutation = useMutation({
     mutationFn: (logId) => api.post(`/v1/checkout/${logId}/`),
@@ -768,6 +903,46 @@ export default function RoomDetail() {
       notifySuccess('Checkout successful.');
     },
     onError: (e) => notifyError(parseApiError(e, 'Checkout failed.')),
+  });
+
+  const [shiftOpened, { open: openShift, close: closeShift }] = useDisclosure(false);
+  const [shiftRoomId, setShiftRoomId] = useState(null);
+  const [shiftReason, setShiftReason] = useState('');
+  const [applyExtraBeds, setApplyExtraBeds] = useState(true);
+  const [shiftExtraBed, setShiftExtraBed] = useState(0);
+  const [shiftExtraBedPrice, setShiftExtraBedPrice] = useState(0);
+
+  const [payCheckoutOpened, { open: openPayCheckout, close: closePayCheckout }] = useDisclosure(false);
+  const [payCheckoutAmount, setPayCheckoutAmount] = useState(0);
+  const [payCheckoutType, setPayCheckoutType] = useState(null);
+
+  const shiftMutation = useMutation({
+    mutationFn: ({ logId, new_room, reason, apply_extra_beds, extra_bed, extra_per_bed_price }) =>
+      api.post(`/v1/stay-logs/${logId}/shift/`, { new_room, reason, apply_extra_beds, extra_bed, extra_per_bed_price }),
+    onSuccess: (res) => {
+      qc.invalidateQueries(QUERY_KEYS.activeLogs);
+      qc.invalidateQueries(QUERY_KEYS.rooms);
+      closeShift();
+      setShiftRoomId(null);
+      setShiftReason('');
+      notifySuccess(`Guest shifted to room ${res.data.new_room_number}.`);
+      navigate(`/rooms/${res.data.new_room_id}`);
+    },
+    onError: (e) => notifyError(parseApiError(e, 'Failed to shift room.')),
+  });
+
+  const payAndCheckoutMutation = useMutation({
+    mutationFn: async ({ logId, payment_type, amount }) => {
+      await api.post(`/v1/stay-logs/${logId}/payments/`, { payment_type, amount, note: 'Collected at checkout' });
+      await api.post(`/v1/checkout/${logId}/`);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries(QUERY_KEYS.activeLogs);
+      qc.invalidateQueries(QUERY_KEYS.rooms);
+      closePayCheckout();
+      notifySuccess('Payment recorded and checkout successful.');
+    },
+    onError: (e) => notifyError(parseApiError(e, 'Pay & checkout failed.')),
   });
 
   if (roomLoading) {
@@ -791,13 +966,50 @@ export default function RoomDetail() {
   if (activeLog) { statusColor = 'red'; statusLabel = 'Occupied'; }
   else if (nextReservation) { statusColor = 'orange'; statusLabel = 'Reserved'; }
 
-  const handleCheckout = () => modals.openConfirmModal({
-    title: 'Confirm checkout',
-    children: <Text size="sm">Check out this room?</Text>,
-    labels: { confirm: 'Checkout', cancel: 'Cancel' },
-    confirmProps: { color: 'red' },
-    onConfirm: () => checkoutMutation.mutate(activeLog.id),
-  });
+  const handleCheckout = () => {
+    const nights = Math.max(1, dayjs().diff(dayjs(activeLog.check_in), 'day'));
+    const roomTotal = (Number(activeLog.price) + activeLog.extra_bed * Number(activeLog.extra_per_bed_price)) * nights;
+    const amenityTotal = (activeLog.amenities || []).reduce((sum, a) =>
+      sum + Number(a.price) * a.quantity * (a.charge_type === 'per_night' ? nights : 1), 0);
+    const overtimeFee = computeOvertimeFee(activeLog);
+    const gstAmount = computeGst(activeLog, nights, configMap['gst_percent']);
+    const billTotal = activeLog.is_nc ? 0 : (roomTotal + amenityTotal + overtimeFee + gstAmount);
+    const totalPaid = (activeLog.payments || []).reduce((s, p) => s + Number(p.amount), 0);
+    const outstandingAmt = billTotal - totalPaid;
+
+    if (outstandingAmt > 0) {
+      setPayCheckoutAmount(outstandingAmt);
+      setPayCheckoutType(null);
+      openPayCheckout();
+    } else {
+      modals.openConfirmModal({
+        title: 'Confirm checkout',
+        children: <Text size="sm">Check out this room?</Text>,
+        labels: { confirm: 'Checkout', cancel: 'Cancel' },
+        confirmProps: { color: 'red' },
+        onConfirm: () => checkoutMutation.mutate(activeLog.id),
+      });
+    }
+  };
+
+  const occupiedIds = new Set(activeLogs.map(l => l.room));
+  const availableRooms = allRooms.filter(r => r.id !== room.id && !occupiedIds.has(r.id));
+
+  const handleOpenShift = () => {
+    setShiftRoomId(null);
+    setShiftReason('');
+    setApplyExtraBeds(activeLog ? activeLog.extra_bed > 0 : false);
+    setShiftExtraBed(activeLog ? activeLog.extra_bed : 0);
+    setShiftExtraBedPrice(activeLog ? Number(activeLog.extra_per_bed_price) : 0);
+    openShift();
+  };
+
+  const paymentTypeOptions = [
+    { value: 'cash', label: 'Cash' },
+    { value: 'upi', label: 'UPI' },
+    { value: 'card', label: 'Card' },
+    { value: 'other', label: 'Other' },
+  ];
 
   return (
     <div>
@@ -808,13 +1020,121 @@ export default function RoomDetail() {
         <div>
           <Text fw={700} size="lg">Room {room.room_number}</Text>
           <Badge color={statusColor} size="sm" mt={2}>{statusLabel}</Badge>
+          {activeLog && isLogOvertime(activeLog) && (
+            <Badge color="yellow" size="sm" ml="xs">Overtime</Badge>
+          )}
         </div>
         {activeLog && (
-          <Button color="red" variant="outline" leftSection={<IconLogout size={16} />} onClick={handleCheckout} loading={checkoutMutation.isPending} style={{ marginLeft: 'clamp(16px, 8vw, 130px)' }}>
-            Checkout
-          </Button>
+          <Group gap="xs" style={{ marginLeft: 'clamp(16px, 8vw, 130px)' }}>
+            <Button variant="outline" color="blue" onClick={handleOpenShift}>
+              Shift Room
+            </Button>
+            <Button color="red" variant="outline" leftSection={<IconLogout size={16} />} onClick={handleCheckout} loading={checkoutMutation.isPending}>
+              Checkout
+            </Button>
+          </Group>
         )}
       </Group>
+
+      <Modal opened={shiftOpened} onClose={closeShift} title="Shift Room">
+        <Select
+          label="Move guest to"
+          placeholder="Select available room"
+          data={availableRooms.map(r => ({ value: String(r.id), label: `Room ${r.room_number} — ${r.beds} bed${r.beds !== 1 ? 's' : ''} — ₹${r.price}` }))}
+          value={shiftRoomId}
+          onChange={setShiftRoomId}
+          searchable
+          mb="xs"
+        />
+        {activeLog && (
+          <Text size="xs" c="dimmed" mb="sm">
+            Price ₹{activeLog.price}/night from current room will be carried over (not the new room's default).
+          </Text>
+        )}
+        {activeLog?.extra_bed > 0 && (
+          <>
+            <Checkbox
+              label="Apply extra beds to new room"
+              checked={applyExtraBeds}
+              onChange={(e) => setApplyExtraBeds(e.currentTarget.checked)}
+              mb="sm"
+            />
+            {applyExtraBeds && (
+              <Group grow mb="sm">
+                <NumberInput label="Extra Beds" min={0} value={shiftExtraBed} onChange={setShiftExtraBed} />
+                <NumberInput label="Price/Extra Bed (₹)" min={0} value={shiftExtraBedPrice} onChange={setShiftExtraBedPrice} />
+              </Group>
+            )}
+          </>
+        )}
+        <Textarea
+          label="Reason"
+          placeholder="Why is this guest being shifted?"
+          value={shiftReason}
+          onChange={(e) => setShiftReason(e.target.value)}
+          rows={3}
+          mb="md"
+          required
+        />
+        <Group justify="flex-end">
+          <Button variant="default" onClick={closeShift}>Cancel</Button>
+          <Button
+            color="blue"
+            disabled={!shiftRoomId || !shiftReason.trim()}
+            loading={shiftMutation.isPending}
+            onClick={() => shiftMutation.mutate({
+              logId: activeLog.id,
+              new_room: Number(shiftRoomId),
+              reason: shiftReason,
+              apply_extra_beds: applyExtraBeds,
+              extra_bed: shiftExtraBed,
+              extra_per_bed_price: shiftExtraBedPrice,
+            })}
+          >
+            Confirm Shift
+          </Button>
+        </Group>
+      </Modal>
+
+      {/* Pay + Checkout Modal */}
+      <Modal opened={payCheckoutOpened} onClose={closePayCheckout} title="Outstanding Balance">
+        <Text size="sm" c="dimmed" mb="md">
+          Full payment is required before checkout. Please collect the outstanding amount.
+        </Text>
+        <Text fw={600} size="lg" mb="md" c="red">
+          Outstanding: ₹{payCheckoutAmount}
+        </Text>
+        <Select
+          label="Payment Type"
+          placeholder="Select type"
+          data={paymentTypeOptions}
+          value={payCheckoutType}
+          onChange={setPayCheckoutType}
+          mb="sm"
+        />
+        <NumberInput
+          label="Amount (₹)"
+          value={payCheckoutAmount}
+          onChange={setPayCheckoutAmount}
+          min={1}
+          mb="md"
+        />
+        <Group justify="flex-end">
+          <Button variant="default" onClick={closePayCheckout}>Cancel</Button>
+          <Button
+            color="teal"
+            disabled={!payCheckoutType || !payCheckoutAmount}
+            loading={payAndCheckoutMutation.isPending}
+            onClick={() => payAndCheckoutMutation.mutate({
+              logId: activeLog.id,
+              payment_type: payCheckoutType,
+              amount: payCheckoutAmount,
+            })}
+          >
+            Pay & Checkout
+          </Button>
+        </Group>
+      </Modal>
 
       <Tabs defaultValue="status">
         <Tabs.List mb="md">
@@ -826,7 +1146,7 @@ export default function RoomDetail() {
           <StatusTab room={room} activeLogs={activeLogs} isReservedToday={isReservedToday} />
         </Tabs.Panel>
         <Tabs.Panel value="reservations" pt="xs">
-          <ReservationsTab room={room} reservations={reservations} isOccupied={!!activeLog} />
+          <ReservationsTab room={room} reservations={reservations} isOccupied={!!activeLog} configMap={configMap} />
         </Tabs.Panel>
         <Tabs.Panel value="details" pt="xs">
           <RoomDetailsTab room={room} />

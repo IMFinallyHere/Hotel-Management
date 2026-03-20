@@ -1,13 +1,15 @@
 import { useState } from 'react';
-import { Stepper, Select, NumberInput, Button, Card, Group, Stack, Title, Text, ThemeIcon, Center } from '@mantine/core';
+import { Stepper, Select, NumberInput, Button, Card, Group, Stack, Title, Text, ThemeIcon, Center, Checkbox } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { IconCheck } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
+import dayjs from 'dayjs';
 import api from '../api/client';
-import { QUERY_KEYS, fetchRooms, fetchActiveLogs } from '../api/queries';
+import { QUERY_KEYS, fetchRooms, fetchActiveLogs, fetchConfigurations } from '../api/queries';
 import { notifyError } from '../api/notify';
 import { parseApiError } from '../api/errorUtils';
 import CustomerSelectWithAdd from '../components/CustomerSelectWithAdd';
+import { parseConfigs } from '../utils/configUtils';
 
 export default function CheckIn() {
   const [active, setActive] = useState(0);
@@ -21,12 +23,16 @@ export default function CheckIn() {
   });
 
   const roomForm = useForm({
-    initialValues: { room: null, price: 0, extra_bed: 0, extra_per_bed_price: 0 },
+    initialValues: { room: null, price: 0, extra_bed: 0, extra_per_bed_price: 0, nights: 1, gst_applied: true },
     validate: { room: (v) => v ? null : 'Select a room.' },
   });
 
   const { data: rooms = [] } = useQuery({ queryKey: QUERY_KEYS.rooms, queryFn: fetchRooms });
   const { data: activeLogs = [] } = useQuery({ queryKey: QUERY_KEYS.activeLogs, queryFn: fetchActiveLogs });
+  const { data: configs = [] } = useQuery({ queryKey: QUERY_KEYS.configurations, queryFn: fetchConfigurations });
+  const configMap = parseConfigs(configs);
+  const defaultCheckoutTime = configMap['default_checkout_time'] ?? '11:00';
+  const gstPercent = configMap['gst_percent'] ?? '0';
 
   const occupiedRoomIds = new Set(activeLogs.map(l => l.room));
   const availableRooms = rooms.filter(r => !occupiedRoomIds.has(r.id));
@@ -56,7 +62,9 @@ export default function CheckIn() {
     }
     setLoading(true);
     try {
-      await api.post('/v1/checkin/', { ...values, room: parseInt(values.room), group: groupId });
+      const [h, m] = defaultCheckoutTime.split(':').map(Number);
+      const expectedCheckout = dayjs().add(values.nights, 'day').hour(h).minute(m).second(0).format('YYYY-MM-DDTHH:mm:ss');
+      await api.post('/v1/checkin/', { ...values, room: parseInt(values.room), group: groupId, expected_checkout: expectedCheckout, gst_applied: values.gst_applied });
       setDone(true);
     } catch (e) {
       notifyError(parseApiError(e, 'Check-in failed.'));
@@ -120,6 +128,16 @@ export default function CheckIn() {
           <NumberInput label="Price (₹, leave 0 to auto-resolve)" min={0} {...roomForm.getInputProps('price')} mb="sm" />
           <NumberInput label="Extra Beds" min={0} {...roomForm.getInputProps('extra_bed')} mb="sm" />
           <NumberInput label="Price per Extra Bed (₹)" min={0} {...roomForm.getInputProps('extra_per_bed_price')} mb="sm" />
+          <NumberInput label="Nights" min={1} {...roomForm.getInputProps('nights')} mb="sm" />
+          <Checkbox
+            label={`Apply GST (${gstPercent}%)`}
+            checked={roomForm.values.gst_applied}
+            onChange={(e) => roomForm.setFieldValue('gst_applied', e.currentTarget.checked)}
+            mb="sm"
+          />
+          <Text size="xs" c="dimmed" mb="sm">
+            Departure: {dayjs().add(roomForm.values.nights, 'day').format('DD MMM YYYY')} at {defaultCheckoutTime}
+          </Text>
           {selectedRoom && (
             <Text size="sm" c={guestExceeded ? 'red' : 'dimmed'} mb="md">
               Selected {guestCount} guest{guestCount !== 1 ? 's' : ''} — max for this room is {maxGuests} ({selectedRoom.beds} bed{selectedRoom.beds !== 1 ? 's' : ''} + {roomForm.values.extra_bed} extra)

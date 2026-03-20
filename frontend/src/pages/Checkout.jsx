@@ -1,14 +1,17 @@
 import { useState } from 'react';
-import { Table, Button, Badge, Group, TextInput, Text, Modal, NumberInput, Select, Stack, ActionIcon, Loader, Textarea } from '@mantine/core';
+import { Table, Button, Badge, Group, TextInput, Text, Modal, NumberInput, Select, Stack, ActionIcon, Loader, Textarea, Checkbox } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { modals } from '@mantine/modals';
-import { IconSearch, IconPackage, IconTrash, IconCash, IconBan } from '@tabler/icons-react';
+import { IconSearch, IconPackage, IconTrash, IconCash, IconBan, IconFileText } from '@tabler/icons-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { PDFDownloadLink } from '@react-pdf/renderer';
 import dayjs from 'dayjs';
 import api from '../api/client';
-import { QUERY_KEYS, QUERY_KEYS_OPS, fetchActiveLogs, fetchRooms, fetchAmenities, fetchGroupCustomers } from '../api/queries';
+import { QUERY_KEYS, QUERY_KEYS_OPS, fetchActiveLogs, fetchRooms, fetchAmenities, fetchGroupCustomers, fetchConfigurations, fetchRoomTypes } from '../api/queries';
 import { notifySuccess, notifyError } from '../api/notify';
 import { parseApiError } from '../api/errorUtils';
+import { parseConfigs, computeOvertimeFee, computeGst } from '../utils/configUtils';
+import InvoiceDocument from '../components/InvoiceDocument';
 
 // ── Customer chips (badges that open detail modal) ──────────────────────────
 
@@ -76,6 +79,10 @@ export default function Checkout() {
   const { data: logs = [], isLoading } = useQuery({ queryKey: QUERY_KEYS.activeLogs, queryFn: fetchActiveLogs });
   const { data: rooms = [] } = useQuery({ queryKey: QUERY_KEYS.rooms, queryFn: fetchRooms });
   const { data: amenities = [] } = useQuery({ queryKey: QUERY_KEYS.amenities, queryFn: fetchAmenities });
+  const { data: configs = [] } = useQuery({ queryKey: QUERY_KEYS.configurations, queryFn: fetchConfigurations });
+  const { data: roomTypes = [] } = useQuery({ queryKey: QUERY_KEYS.roomTypes, queryFn: fetchRoomTypes });
+  const configMap = parseConfigs(configs);
+  const roomTypeMap = Object.fromEntries(roomTypes.map(rt => [rt.id, rt.name]));
 
   // Amenity modal
   const [amenityModal, { open: openAmenityModal, close: closeAmenityModal }] = useDisclosure(false);
@@ -90,17 +97,33 @@ export default function Checkout() {
   const [newPaymentAmount, setNewPaymentAmount] = useState(0);
   const [newPaymentNote, setNewPaymentNote] = useState('');
 
+  // Pay + Checkout modal (for enforced payment at checkout)
+  const [payCheckoutModal, { open: openPayCheckoutModal, close: closePayCheckoutModal }] = useDisclosure(false);
+  const [payCheckoutLog, setPayCheckoutLog] = useState(null);
+  const [payCheckoutAmount, setPayCheckoutAmount] = useState(0);
+  const [payCheckoutType, setPayCheckoutType] = useState(null);
+
   // NC Request modal
   const [ncModal, { open: openNcModal, close: closeNcModal }] = useDisclosure(false);
   const [ncLog, setNcLog] = useState(null);
   const [ncReason, setNcReason] = useState('');
 
-  const roomMap = Object.fromEntries(rooms.map(r => [r.id, r.room_number]));
+  // Shift Room modal
+  const [shiftModal, { open: openShiftModal, close: closeShiftModal }] = useDisclosure(false);
+  const [shiftLog, setShiftLog] = useState(null);
+  const [shiftRoomId, setShiftRoomId] = useState(null);
+  const [shiftReason, setShiftReason] = useState('');
+  const [applyExtraBeds, setApplyExtraBeds] = useState(true);
+  const [shiftExtraBed, setShiftExtraBed] = useState(0);
+  const [shiftExtraBedPrice, setShiftExtraBedPrice] = useState(0);
+
+  const roomMap = Object.fromEntries(rooms.map(r => [r.id, r]));
+  const occupiedRoomIds = new Set(logs.map(l => l.room));
 
   const filteredLogs = search
     ? logs.filter(l => {
         const q = search.toLowerCase();
-        const roomNum = (roomMap[l.room] ?? String(l.room)).toLowerCase();
+        const roomNum = (roomMap[l.room]?.room_number ?? String(l.room)).toLowerCase();
         const guestNames = (l.customers || []).map(c => c.name.toLowerCase()).join(' ');
         return roomNum.includes(q) || guestNames.includes(q);
       })
@@ -114,6 +137,22 @@ export default function Checkout() {
       notifySuccess('Checkout successful.');
     },
     onError: (e) => notifyError(parseApiError(e, 'Checkout failed.')),
+  });
+
+  const payAndCheckoutMutation = useMutation({
+    mutationFn: async ({ logId, payment_type, amount }) => {
+      await api.post(`/v1/stay-logs/${logId}/payments/`, { payment_type, amount, note: 'Collected at checkout' });
+      await api.post(`/v1/checkout/${logId}/`);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries(QUERY_KEYS.activeLogs);
+      qc.invalidateQueries(QUERY_KEYS.rooms);
+      closePayCheckoutModal();
+      setPayCheckoutLog(null);
+      setPayCheckoutType(null);
+      notifySuccess('Payment recorded and checkout successful.');
+    },
+    onError: (e) => notifyError(parseApiError(e, 'Pay & checkout failed.')),
   });
 
   const addAmenityMutation = useMutation({
@@ -170,13 +209,56 @@ export default function Checkout() {
     onError: (e) => notifyError(parseApiError(e, 'Failed to submit NC request.')),
   });
 
-  const handleCheckout = (record) => modals.openConfirmModal({
-    title: 'Confirm checkout',
-    children: <Text size="sm">Check out room {roomMap[record.room] ?? record.room}?</Text>,
-    labels: { confirm: 'Checkout', cancel: 'Cancel' },
-    confirmProps: { color: 'red' },
-    onConfirm: () => checkoutMutation.mutate(record.id),
+  const shiftMutation = useMutation({
+    mutationFn: ({ logId, new_room, reason, apply_extra_beds, extra_bed, extra_per_bed_price }) =>
+      api.post(`/v1/stay-logs/${logId}/shift/`, { new_room, reason, apply_extra_beds, extra_bed, extra_per_bed_price }),
+    onSuccess: (res) => {
+      qc.invalidateQueries(QUERY_KEYS.activeLogs);
+      qc.invalidateQueries(QUERY_KEYS.rooms);
+      closeShiftModal();
+      setShiftRoomId(null);
+      setShiftReason('');
+      notifySuccess(`Guest shifted to room ${res.data.new_room_number}.`);
+    },
+    onError: (e) => notifyError(parseApiError(e, 'Failed to shift room.')),
   });
+
+  const openShift = (log) => {
+    setShiftLog(log);
+    setShiftRoomId(null);
+    setShiftReason('');
+    setApplyExtraBeds(log.extra_bed > 0);
+    setShiftExtraBed(log.extra_bed);
+    setShiftExtraBedPrice(Number(log.extra_per_bed_price));
+    openShiftModal();
+  };
+
+  const handleCheckout = (record) => {
+    const nights = Math.max(1, dayjs().diff(dayjs(record.check_in), 'day'));
+    const roomTotal = (Number(record.price) + record.extra_bed * Number(record.extra_per_bed_price)) * nights;
+    const amenityTotal = (record.amenities || []).reduce((sum, a) =>
+      sum + Number(a.price) * a.quantity * (a.charge_type === 'per_night' ? nights : 1), 0);
+    const overtimeFee = computeOvertimeFee(record);
+    const gstAmount = computeGst(record, nights, configMap['gst_percent']);
+    const billTotal = record.is_nc ? 0 : (roomTotal + amenityTotal + overtimeFee + gstAmount);
+    const totalPaid = (record.payments || []).reduce((s, p) => s + Number(p.amount), 0);
+    const outstanding = billTotal - totalPaid;
+
+    if (outstanding > 0) {
+      setPayCheckoutLog(record);
+      setPayCheckoutAmount(outstanding);
+      setPayCheckoutType(null);
+      openPayCheckoutModal();
+    } else {
+      modals.openConfirmModal({
+        title: 'Confirm checkout',
+        children: <Text size="sm">Check out room {roomMap[record.room]?.room_number ?? record.room}?</Text>,
+        labels: { confirm: 'Checkout', cancel: 'Cancel' },
+        confirmProps: { color: 'red' },
+        onConfirm: () => checkoutMutation.mutate(record.id),
+      });
+    }
+  };
 
   const openAmenities = (log) => {
     setSelectedLog(log);
@@ -225,16 +307,24 @@ export default function Checkout() {
     const roomTotal = (Number(log.price) + log.extra_bed * Number(log.extra_per_bed_price)) * nights;
     const amenityTotal = (log.amenities || []).reduce((sum, a) =>
       sum + Number(a.price) * a.quantity * (a.charge_type === 'per_night' ? nights : 1), 0);
-    const total = log.is_nc ? 0 : (roomTotal + amenityTotal);
+    const overtimeFee = computeOvertimeFee(log);
+    const gstAmount = computeGst(log, nights, configMap['gst_percent']);
+    const total = log.is_nc ? 0 : (roomTotal + amenityTotal + overtimeFee + gstAmount);
     const ncStatus = log.nc_status;
+
+    const room = roomMap[log.room];
+    const roomNumber = room?.room_number ?? log.room;
+    const roomTypeName = room ? roomTypeMap[room.room_type] : undefined;
 
     return (
       <Table.Tr key={log.id}>
         <Table.Td>
           <Group gap={4}>
-            {roomMap[log.room] ?? log.room}
+            {roomNumber}
             {log.is_nc && <Badge size="xs" color="grape">NC</Badge>}
             {!log.is_nc && ncStatus?.status === 'pending' && <Badge size="xs" color="orange">NC Pending</Badge>}
+            {log.is_early_checkin && <Badge size="xs" color="cyan">Early</Badge>}
+            {log.gst_applied && <Badge size="xs" color="teal">GST</Badge>}
           </Group>
         </Table.Td>
         <Table.Td><GuestChips customers={log.customers} groupId={log.group} /></Table.Td>
@@ -243,9 +333,9 @@ export default function Checkout() {
         <Table.Td>{log.extra_bed}</Table.Td>
         <Table.Td>{log.extra_per_bed_price > 0 ? `₹${log.extra_per_bed_price}` : '—'}</Table.Td>
         <Table.Td>{nights}</Table.Td>
-        <Table.Td>
-          {amenityTotal > 0 ? `₹${amenityTotal}` : '—'}
-        </Table.Td>
+        <Table.Td>{amenityTotal > 0 ? `₹${amenityTotal}` : '—'}</Table.Td>
+        <Table.Td>{overtimeFee > 0 ? <Badge color="yellow" variant="light">₹{overtimeFee}</Badge> : '—'}</Table.Td>
+        <Table.Td>{gstAmount > 0 ? <Badge color="teal" variant="light">₹{gstAmount}</Badge> : '—'}</Table.Td>
         <Table.Td fw={600}>{log.is_nc ? <Badge color="grape" variant="light">₹0 (NC)</Badge> : `₹${total}`}</Table.Td>
         <Table.Td>
           <Group gap="xs">
@@ -259,6 +349,21 @@ export default function Checkout() {
               <Button size="xs" variant="light" color="grape" leftSection={<IconBan size={14} />} onClick={() => openNc(log)}>
                 Mark NC
               </Button>
+            )}
+            <Button size="xs" variant="light" color="blue" onClick={() => openShift(log)}>
+              Shift Room
+            </Button>
+            {log.gst_applied && log.check_out && (
+              <PDFDownloadLink
+                document={<InvoiceDocument log={log} roomNumber={roomNumber} roomTypeName={roomTypeName} configMap={configMap} nights={nights} />}
+                fileName={`invoice-${log.id}.pdf`}
+              >
+                {({ loading }) => (
+                  <Button size="xs" variant="light" color="green" leftSection={<IconFileText size={14} />} loading={loading}>
+                    Invoice
+                  </Button>
+                )}
+              </PDFDownloadLink>
             )}
             <Button size="xs" color="red" variant="light" onClick={() => handleCheckout(log)}>
               Checkout
@@ -288,7 +393,9 @@ export default function Checkout() {
     ? (currentPaymentLog.amenities || []).reduce((sum, a) =>
         sum + Number(a.price) * a.quantity * (a.charge_type === 'per_night' ? currentPaymentNights : 1), 0)
     : 0;
-  const billTotal = currentPaymentLog?.is_nc ? 0 : (paymentRoomTotal + paymentAmenityTotal);
+  const paymentOvertimeFee = currentPaymentLog ? computeOvertimeFee(currentPaymentLog) : 0;
+  const paymentGstAmount = currentPaymentLog ? computeGst(currentPaymentLog, currentPaymentNights, configMap['gst_percent']) : 0;
+  const billTotal = currentPaymentLog?.is_nc ? 0 : (paymentRoomTotal + paymentAmenityTotal + paymentOvertimeFee + paymentGstAmount);
   const outstanding = billTotal - totalPaid;
 
   return (
@@ -304,32 +411,36 @@ export default function Checkout() {
         />
       </Group>
 
-      <Table striped highlightOnHover withTableBorder>
-        <Table.Thead>
-          <Table.Tr>
-            <Table.Th>Room</Table.Th>
-            <Table.Th>Guests</Table.Th>
-            <Table.Th>Check-In</Table.Th>
-            <Table.Th>Price</Table.Th>
-            <Table.Th>Extra Beds</Table.Th>
-            <Table.Th>Extra Bed Price</Table.Th>
-            <Table.Th>Nights</Table.Th>
-            <Table.Th>Amenities</Table.Th>
-            <Table.Th>Total</Table.Th>
-            <Table.Th>Action</Table.Th>
-          </Table.Tr>
-        </Table.Thead>
-        <Table.Tbody>
-          {isLoading ? (
-            <Table.Tr><Table.Td colSpan={10} ta="center">Loading...</Table.Td></Table.Tr>
-          ) : rows.length === 0 ? (
-            <Table.Tr><Table.Td colSpan={10} ta="center">No occupied rooms.</Table.Td></Table.Tr>
-          ) : rows}
-        </Table.Tbody>
-      </Table>
+      <Table.ScrollContainer minWidth={1100}>
+        <Table striped highlightOnHover withTableBorder>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>Room</Table.Th>
+              <Table.Th>Guests</Table.Th>
+              <Table.Th>Check-In</Table.Th>
+              <Table.Th>Price</Table.Th>
+              <Table.Th>Extra Beds</Table.Th>
+              <Table.Th>Extra Bed Price</Table.Th>
+              <Table.Th>Nights</Table.Th>
+              <Table.Th>Amenities</Table.Th>
+              <Table.Th>Overtime</Table.Th>
+              <Table.Th>GST</Table.Th>
+              <Table.Th>Total</Table.Th>
+              <Table.Th>Action</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {isLoading ? (
+              <Table.Tr><Table.Td colSpan={12} ta="center">Loading...</Table.Td></Table.Tr>
+            ) : rows.length === 0 ? (
+              <Table.Tr><Table.Td colSpan={12} ta="center">No occupied rooms.</Table.Td></Table.Tr>
+            ) : rows}
+          </Table.Tbody>
+        </Table>
+      </Table.ScrollContainer>
 
       {/* Amenity Modal */}
-      <Modal opened={amenityModal} onClose={closeAmenityModal} title={`Amenities — Room ${currentLog ? (roomMap[currentLog.room] ?? currentLog.room) : ''}`} size="lg">
+      <Modal opened={amenityModal} onClose={closeAmenityModal} title={`Amenities — Room ${currentLog ? (roomMap[currentLog.room]?.room_number ?? currentLog.room) : ''}`} size="lg">
         {logAmenities.length > 0 ? (
           <Table striped withTableBorder mb="md">
             <Table.Thead>
@@ -391,11 +502,17 @@ export default function Checkout() {
       <Modal
         opened={paymentModal}
         onClose={closePaymentModal}
-        title={`Payments — Room ${currentPaymentLog ? (roomMap[currentPaymentLog.room] ?? currentPaymentLog.room) : ''}`}
+        title={`Payments — Room ${currentPaymentLog ? (roomMap[currentPaymentLog.room]?.room_number ?? currentPaymentLog.room) : ''}`}
         size="lg"
       >
         <Group mb="md" gap="xl">
           <Text size="sm">Bill: <strong>₹{billTotal}</strong></Text>
+          {paymentOvertimeFee > 0 && (
+            <Text size="sm" c="yellow">Overtime: <strong>₹{paymentOvertimeFee}</strong></Text>
+          )}
+          {paymentGstAmount > 0 && (
+            <Text size="sm" c="teal">GST: <strong>₹{paymentGstAmount}</strong></Text>
+          )}
           <Text size="sm">Paid: <strong style={{ color: 'green' }}>₹{totalPaid}</strong></Text>
           <Text size="sm">Outstanding: <strong style={{ color: outstanding > 0 ? 'red' : 'inherit' }}>₹{outstanding}</strong></Text>
         </Group>
@@ -469,7 +586,7 @@ export default function Checkout() {
       <Modal
         opened={ncModal}
         onClose={closeNcModal}
-        title={`Mark as NC — Room ${ncLog ? (roomMap[ncLog.room] ?? ncLog.room) : ''}`}
+        title={`Mark as NC — Room ${ncLog ? (roomMap[ncLog.room]?.room_number ?? ncLog.room) : ''}`}
       >
         <Text size="sm" c="dimmed" mb="md">
           Submitting an NC request will mark this stay as Not Chargeable (pending admin approval).
@@ -492,6 +609,117 @@ export default function Checkout() {
             onClick={() => createNcMutation.mutate({ stay_log: ncLog.id, reason: ncReason })}
           >
             Submit NC Request
+          </Button>
+        </Group>
+      </Modal>
+
+      {/* Shift Room Modal */}
+      <Modal
+        opened={shiftModal}
+        onClose={closeShiftModal}
+        title={`Shift Room — Room ${shiftLog ? (roomMap[shiftLog.room]?.room_number ?? shiftLog.room) : ''}`}
+      >
+        <Select
+          label="Move guest to"
+          placeholder="Select available room"
+          data={rooms
+            .filter(r => !occupiedRoomIds.has(r.id))
+            .map(r => ({ value: String(r.id), label: `Room ${r.room_number} — ${r.beds} bed${r.beds !== 1 ? 's' : ''} — ₹${r.price}` }))}
+          value={shiftRoomId}
+          onChange={setShiftRoomId}
+          searchable
+          mb="xs"
+        />
+        {shiftLog && (
+          <Text size="xs" c="dimmed" mb="sm">
+            Price ₹{shiftLog.price}/night from current room will be carried over (not the new room's default).
+          </Text>
+        )}
+        {shiftLog?.extra_bed > 0 && (
+          <>
+            <Checkbox
+              label="Apply extra beds to new room"
+              checked={applyExtraBeds}
+              onChange={(e) => setApplyExtraBeds(e.currentTarget.checked)}
+              mb="sm"
+            />
+            {applyExtraBeds && (
+              <Group grow mb="sm">
+                <NumberInput label="Extra Beds" min={0} value={shiftExtraBed} onChange={setShiftExtraBed} />
+                <NumberInput label="Price/Extra Bed (₹)" min={0} value={shiftExtraBedPrice} onChange={setShiftExtraBedPrice} />
+              </Group>
+            )}
+          </>
+        )}
+        <Textarea
+          label="Reason"
+          placeholder="Why is this guest being shifted?"
+          value={shiftReason}
+          onChange={(e) => setShiftReason(e.target.value)}
+          rows={3}
+          mb="md"
+          required
+        />
+        <Group justify="flex-end">
+          <Button variant="default" onClick={closeShiftModal}>Cancel</Button>
+          <Button
+            color="blue"
+            disabled={!shiftRoomId || !shiftReason.trim()}
+            loading={shiftMutation.isPending}
+            onClick={() => shiftMutation.mutate({
+              logId: shiftLog.id,
+              new_room: Number(shiftRoomId),
+              reason: shiftReason,
+              apply_extra_beds: applyExtraBeds,
+              extra_bed: shiftExtraBed,
+              extra_per_bed_price: shiftExtraBedPrice,
+            })}
+          >
+            Confirm Shift
+          </Button>
+        </Group>
+      </Modal>
+
+      {/* Pay + Checkout Modal */}
+      <Modal
+        opened={payCheckoutModal}
+        onClose={closePayCheckoutModal}
+        title={`Outstanding Balance — Room ${payCheckoutLog ? (roomMap[payCheckoutLog.room]?.room_number ?? payCheckoutLog.room) : ''}`}
+      >
+        <Text size="sm" c="dimmed" mb="md">
+          Full payment is required before checkout. Please collect the outstanding amount.
+        </Text>
+        <Text fw={600} size="lg" mb="md" c="red">
+          Outstanding: ₹{payCheckoutAmount}
+        </Text>
+        <Select
+          label="Payment Type"
+          placeholder="Select type"
+          data={paymentTypeOptions}
+          value={payCheckoutType}
+          onChange={setPayCheckoutType}
+          mb="sm"
+        />
+        <NumberInput
+          label="Amount (₹)"
+          value={payCheckoutAmount}
+          onChange={setPayCheckoutAmount}
+          min={1}
+          mb="md"
+        />
+        <Group justify="flex-end">
+          <Button variant="default" onClick={closePayCheckoutModal}>Cancel</Button>
+          <Button
+            color="teal"
+            disabled={!payCheckoutType || !payCheckoutAmount}
+            loading={payAndCheckoutMutation.isPending}
+            onClick={() => payAndCheckoutMutation.mutate({
+              logId: payCheckoutLog.id,
+              payment_type: payCheckoutType,
+              amount: payCheckoutAmount,
+            })}
+          >
+            Pay & Checkout
           </Button>
         </Group>
       </Modal>

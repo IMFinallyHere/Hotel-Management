@@ -74,6 +74,8 @@ export const QUERY_KEYS_OPS = {
   cashWithdrawals: ['cash-withdrawals'],
   expenses: (params) => ['expenses', params],
   stayLogPayments: (logId) => ['stay-log-payments', logId],
+  stayHistory: (params) => ['stay-history', params],
+  gstReport: (params) => ['gst-report', params],
 };
 
 export const fetchNcRequests = () => api.get('/v1/nc-requests/').then(r => r.data);
@@ -84,3 +86,5 @@ export const fetchPLReport = (params) => api.get('/v1/finance/pl/', { params }).
 export const fetchStaffSales = (params) => api.get('/v1/finance/staff-sales/', { params }).then(r => r.data);
 export const fetchCashReconciliation = (params) => api.get('/v1/finance/cash-reconciliation/', { params }).then(r => r.data);
 export const fetchExpenseReport = (params) => api.get('/v1/finance/expenses/', { params }).then(r => r.data);
+export const fetchStayHistory = (params) => api.get('/v1/stay-logs/history/', { params }).then(r => r.data);
+export const fetchGSTReport = (params) => api.get('/v1/reports/gst/', { params }).then(r => r.data);

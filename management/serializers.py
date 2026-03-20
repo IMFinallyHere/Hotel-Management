@@ -1,3 +1,4 @@
+import datetime
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 from django.shortcuts import get_object_or_404
@@ -45,9 +46,11 @@ class RoomsPriceChartSerializer(serializers.ModelSerializer):
 class CheckinSerializer(serializers.ModelSerializer):
     class Meta:
         model = RoomStayLogs
-        fields = ['room', 'price', 'group', 'extra_bed', 'extra_per_bed_price']
+        fields = ['room', 'price', 'group', 'extra_bed', 'extra_per_bed_price', 'expected_checkout', 'gst_applied']
         extra_kwargs = {
             'price': {'required': False, 'default': 0},
+            'expected_checkout': {'required': False},
+            'gst_applied': {'required': False, 'default': False},
         }
 
     @staticmethod
@@ -64,13 +67,27 @@ class CheckinSerializer(serializers.ModelSerializer):
             today = timezone.localdate()
             chart_entry = RoomsPriceChart.objects.filter(room=room, date=today).first()
             attrs['price'] = chart_entry.price if chart_entry else room.price
+
+        # Snapshot overtime rate
+        attrs['overtime_rate'] = attrs['price']
+
+        # Detect early check-in vs. default_checkin_time config
+        cfg = Configurations.objects.filter(key='default_checkin_time').first()
+        if cfg and cfg.value:
+            h, m = map(int, cfg.value.split(':'))
+            attrs['is_early_checkin'] = timezone.localtime().time() < datetime.time(h, m)
+        else:
+            attrs['is_early_checkin'] = False
+
         return attrs
 
 
 class StayLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = RoomStayLogs
-        fields = ['id', 'room', 'group', 'check_in', 'check_out', 'price', 'extra_bed', 'extra_per_bed_price', 'is_nc']
+        fields = ['id', 'room', 'group', 'check_in', 'check_out', 'price', 'extra_bed', 'extra_per_bed_price', 'is_nc',
+                  'expected_checkout', 'overtime_rate', 'grace_until', 'is_early_checkin', 'gst_applied',
+                  'shifted_from', 'shift_reason']
 
 
 class StayLogUpdateSerializer(serializers.ModelSerializer):
@@ -250,3 +267,26 @@ class ExpenseSerializer(serializers.ModelSerializer):
         if obj.recorded_by:
             return obj.recorded_by.get_full_name() or obj.recorded_by.username
         return None
+
+
+class ExtendStaySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RoomStayLogs
+        fields = ['expected_checkout']
+
+    def validate_expected_checkout(self, value):
+        if value <= timezone.now():
+            raise ValidationError('New checkout must be in the future.')
+        return value
+
+
+class GraceSerializer(serializers.Serializer):
+    hours = serializers.IntegerField(min_value=1, max_value=3)
+
+
+class ShiftRoomSerializer(serializers.Serializer):
+    new_room = serializers.PrimaryKeyRelatedField(queryset=Rooms.objects.all())
+    reason = serializers.CharField(max_length=500)
+    apply_extra_beds = serializers.BooleanField(default=True)
+    extra_bed = serializers.IntegerField(min_value=0, required=False)
+    extra_per_bed_price = serializers.DecimalField(max_digits=7, decimal_places=0, required=False)

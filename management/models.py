@@ -80,6 +80,13 @@ class RoomStayLogs(models.Model):
     extra_bed = models.PositiveSmallIntegerField(default=0)
     extra_per_bed_price = models.DecimalField(max_digits=7, decimal_places=0, default=0)
     is_nc = models.BooleanField(default=False)
+    expected_checkout = models.DateTimeField(null=True, blank=True)
+    overtime_rate = models.DecimalField(max_digits=7, decimal_places=0, null=True, blank=True)
+    grace_until = models.DateTimeField(null=True, blank=True)
+    is_early_checkin = models.BooleanField(default=False)
+    gst_applied = models.BooleanField(default=False)
+    shifted_from = models.ForeignKey('Rooms', models.SET_NULL, null=True, blank=True, related_name='shift_destinations')
+    shift_reason = models.TextField(null=True, blank=True)
 
 
 class Configurations(models.Model):

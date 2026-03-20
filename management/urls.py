@@ -14,7 +14,8 @@ from .views import (RoomTypeListCreate, RoomTypeDetail, RoomListCreate, RoomDeta
                     StayLogPaymentListCreate, StayLogPaymentDetail,
                     CashWithdrawalListCreate, CashWithdrawalDetail, CashWithdrawalApprove, CashWithdrawalReject,
                     ExpenseListCreate, ExpenseDetail,
-                    PLReportView, StaffSalesView, CashReconciliationView, ExpenseReportView)
+                    PLReportView, StaffSalesView, CashReconciliationView, ExpenseReportView,
+                    ExtendStay, GrantGrace, ShiftRoom, GSTReportView, StayLogHistory)
 from .auth_views import UserListCreate, UserDetail, GroupListCreate, GroupDetail, PermissionListView
 
 
@@ -32,7 +33,11 @@ urlpatterns = [
     path('price/chart/', RoomsPriceChartListCreate.as_view(), name='price-chart-list-create'),
     path('price/chart/<int:pk>/', RoomsPriceChartDetail.as_view(), name='price-chart-detail'),
     path('stay-logs/', StayLogListActive.as_view(), name='stay-logs-active'),
+    path('stay-logs/history/', StayLogHistory.as_view(), name='stay-logs-history'),
     path('stay-logs/<int:pk>/', StayLogDetail.as_view(), name='stay-log-detail'),
+    path('stay-logs/<int:pk>/extend/', ExtendStay.as_view(), name='stay-log-extend'),
+    path('stay-logs/<int:pk>/grace/', GrantGrace.as_view(), name='stay-log-grace'),
+    path('stay-logs/<int:pk>/shift/', ShiftRoom.as_view(), name='stay-log-shift'),
     path('checkin/', Checkin.as_view(), name='checkin'),
     path('checkout/<int:pk>/', Checkout.as_view(), name='checkout'),
     path('group/customers/', group_customer, name='group-customers'),
@@ -57,6 +62,7 @@ urlpatterns = [
     path('cash-withdrawals/<int:pk>/reject/', CashWithdrawalReject.as_view(), name='cash-withdrawal-reject'),
     path('expenses/', ExpenseListCreate.as_view(), name='expense-list-create'),
     path('expenses/<int:pk>/', ExpenseDetail.as_view(), name='expense-detail'),
+    path('reports/gst/', GSTReportView.as_view(), name='report-gst'),
     path('reports/revenue/', RevenueReportView.as_view(), name='report-revenue'),
     path('reports/occupancy/', OccupancyReportView.as_view(), name='report-occupancy'),
     path('reports/guests/', GuestReportView.as_view(), name='report-guests'),

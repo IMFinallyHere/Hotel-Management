@@ -10,7 +10,7 @@ from django.db.models import ProtectedError
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, Group, CustomerGroup, RoomsPriceChart, Reservation, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense
-from .serializers import RoomSerializer, RoomTypeSerializer, CountryCodeSerializer, CustomerSerializer, ConfigurationSerializer, CheckinSerializer, GroupCustomerSerializer, RoomsPriceChartSerializer, StayLogSerializer, StayLogUpdateSerializer, ReservationSerializer, AmenitySerializer, StayLogAmenitySerializer, ActiveStayLogSerializer, RoomNCRequestSerializer, PaymentSerializer, CashWithdrawalSerializer, ExpenseSerializer
+from .serializers import RoomSerializer, RoomTypeSerializer, CountryCodeSerializer, CustomerSerializer, ConfigurationSerializer, CheckinSerializer, GroupCustomerSerializer, RoomsPriceChartSerializer, StayLogSerializer, StayLogUpdateSerializer, ReservationSerializer, AmenitySerializer, StayLogAmenitySerializer, ActiveStayLogSerializer, RoomNCRequestSerializer, PaymentSerializer, CashWithdrawalSerializer, ExpenseSerializer, ExtendStaySerializer, GraceSerializer, ShiftRoomSerializer
 from .permissions import report_permission, HasModelPermission
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.permissions import DjangoModelPermissions
@@ -1452,3 +1452,205 @@ class ExpenseReportView(APIView):
             'by_payment_type': {k: float(v) for k, v in by_payment_type.items()},
             'by_day': by_day_list,
         })
+
+
+class ExtendStay(APIView):
+    permission_classes = [DjangoModelPermissions]
+
+    @staticmethod
+    def get_queryset():
+        return RoomStayLogs.objects.all()
+
+    def patch(self, request, pk):
+        log = get_object_or_404(RoomStayLogs, pk=pk)
+        if log.check_out is not None:
+            return Response({'error': 'Stay has already ended.'}, status=400)
+
+        serializer = ExtendStaySerializer(log, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+
+        new_expected = serializer.validated_data['expected_checkout']
+        new_date = new_expected.date()
+        old_date = log.expected_checkout.date() if log.expected_checkout else timezone.localdate()
+
+        if Reservation.objects.filter(
+            room=log.room,
+            check_in_date__lt=new_date,
+            check_out_date__gt=old_date,
+        ).exists():
+            return Response({'error': 'Conflicting reservation in extended period.'}, status=400)
+
+        log.expected_checkout = new_expected
+        log.save()
+        return Response(ActiveStayLogSerializer(log).data)
+
+
+class GrantGrace(APIView):
+    permission_classes = [DjangoModelPermissions]
+
+    @staticmethod
+    def get_queryset():
+        return RoomStayLogs.objects.all()
+
+    def post(self, request, pk):
+        log = get_object_or_404(RoomStayLogs, pk=pk)
+        if log.check_out is not None:
+            return Response({'error': 'Stay has already ended.'}, status=400)
+
+        if not log.expected_checkout:
+            return Response({'error': 'No expected checkout set for this stay.'}, status=400)
+
+        if log.expected_checkout.date() != timezone.localdate():
+            return Response(
+                {'error': 'Grace can only be granted on the checkout day. Use Extend Stay instead.'},
+                status=400,
+            )
+
+        serializer = GraceSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        hours = serializer.validated_data['hours']
+        log.grace_until = timezone.now() + timedelta(hours=hours)
+        log.save()
+        return Response({'grace_until': log.grace_until})
+
+
+class ShiftRoom(APIView):
+    permission_classes = [DjangoModelPermissions]
+
+    @staticmethod
+    def get_queryset():
+        return RoomStayLogs.objects.all()
+
+    def post(self, request, pk):
+        log = get_object_or_404(RoomStayLogs, pk=pk)
+        if log.check_out is not None:
+            return Response({'error': 'Stay has already ended.'}, status=400)
+
+        serializer = ShiftRoomSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        new_room = serializer.validated_data['new_room']
+        reason = serializer.validated_data['reason']
+
+        if new_room.pk == log.room.pk:
+            return Response({'error': 'New room must be different from the current room.'}, status=400)
+
+        if new_room.is_occupied():
+            return Response({'error': f'Room {new_room.room_number} is already occupied.'}, status=400)
+
+        now = timezone.now()
+
+        # Check out the old room
+        log.check_out = now
+        log.save()
+
+        # Determine extra bed carry-over
+        apply = serializer.validated_data.get('apply_extra_beds', True)
+        extra_bed = serializer.validated_data.get('extra_bed', log.extra_bed) if apply else 0
+        extra_per_bed_price = serializer.validated_data.get('extra_per_bed_price', log.extra_per_bed_price) if apply else 0
+
+        # Create a new stay log for the new room, preserving all stay details
+        new_log = RoomStayLogs(
+            room=new_room,
+            group=log.group,
+            price=log.price,
+            extra_bed=extra_bed,
+            extra_per_bed_price=extra_per_bed_price,
+            is_nc=log.is_nc,
+            expected_checkout=log.expected_checkout,
+            overtime_rate=log.overtime_rate,
+            is_early_checkin=log.is_early_checkin,
+            gst_applied=log.gst_applied,
+            shifted_from=log.room,
+            shift_reason=reason,
+        )
+        new_log.save()
+        # Preserve original check-in time
+        RoomStayLogs.objects.filter(pk=new_log.pk).update(check_in=log.check_in)
+        new_log.refresh_from_db()
+
+        # Transfer amenities to the new log
+        for sa in log.amenities.all():
+            StayLogAmenity.objects.create(
+                stay_log=new_log,
+                amenity=sa.amenity,
+                quantity=sa.quantity,
+            )
+
+        return Response({'new_log_id': new_log.id, 'new_room_id': new_room.id, 'new_room_number': new_room.room_number})
+
+
+class GSTReportView(APIView):
+    permission_classes = [report_permission('view_revenue_report')]
+
+    def get(self, request):
+        today = timezone.localdate()
+        start = _parse_date(request.query_params.get('start_date'), today - timedelta(days=30))
+        end = _parse_date(request.query_params.get('end_date'), today)
+
+        gst_cfg = Configurations.objects.filter(key='gst_percent').first()
+        gst_rate = Decimal(gst_cfg.value) / 100 if gst_cfg and gst_cfg.value else Decimal(0)
+
+        logs = RoomStayLogs.objects.filter(
+            check_out__isnull=False,
+            gst_applied=True,
+            check_out__date__gte=start,
+            check_out__date__lte=end,
+        ).select_related('room', 'group').prefetch_related('group__customers__customer')
+
+        entries = []
+        total_gst = Decimal(0)
+        total_room_revenue = Decimal(0)
+
+        for log in logs:
+            nights = max(1, (log.check_out.date() - log.check_in.date()).days)
+            room_base = (log.price + log.extra_bed * log.extra_per_bed_price) * nights
+            gst_amount = room_base * gst_rate
+            total_room_revenue += room_base
+            total_gst += gst_amount
+            guests = [cg.customer.name for cg in log.group.customers.all()]
+            entries.append({
+                'log_id': log.id,
+                'room': log.room.room_number,
+                'guests': guests,
+                'check_in': log.check_in.date().isoformat(),
+                'check_out': log.check_out.date().isoformat(),
+                'nights': nights,
+                'room_base': float(room_base),
+                'gst_amount': float(gst_amount),
+            })
+
+        return Response({
+            'total_gst': float(total_gst),
+            'total_room_revenue': float(total_room_revenue),
+            'gst_rate': float(gst_rate * 100),
+            'entries': entries,
+        })
+
+
+class StayLogHistory(generics.ListAPIView):
+    serializer_class = ActiveStayLogSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        qs = RoomStayLogs.objects.filter(check_out__isnull=False) \
+            .select_related('room', 'group') \
+            .prefetch_related('group__customers__customer', 'amenities__amenity',
+                              'payments__processed_by', 'nc_requests') \
+            .order_by('-check_out')
+
+        search = self.request.query_params.get('search', '').strip()
+        start = self.request.query_params.get('start_date')
+        end = self.request.query_params.get('end_date')
+
+        if search:
+            qs = qs.filter(
+                Q(room__room_number__icontains=search) |
+                Q(group__customers__customer__name__icontains=search)
+            ).distinct()
+        if start:
+            qs = qs.filter(check_in__date__gte=start)
+        if end:
+            qs = qs.filter(check_out__date__lte=end)
+        return qs
