@@ -20,7 +20,6 @@ import PriceChart from './pages/PriceChart';
 import Customers from './pages/Customers';
 import CountryCodes from './pages/CountryCodes';
 import Configurations from './pages/Configurations';
-import CheckIn from './pages/CheckIn';
 import Checkout from './pages/Checkout';
 import TodayOverview from './pages/TodayOverview';
 import RevenueReport from './pages/RevenueReport';
@@ -94,7 +93,7 @@ function AppLayout() {
 
   return (
     <AppShell
-      navbar={{ width: 220, breakpoint: 'sm', collapsed: { mobile: !navOpened } }}
+      navbar={{ width: 250, breakpoint: 'sm', collapsed: { mobile: !navOpened } }}
       header={{ height: 60 }}
       padding="md"
     >
@@ -134,7 +133,7 @@ function AppLayout() {
         </Group>
       </AppShell.Header>
 
-      <AppShell.Navbar p="xs" style={{ background: '#1a1b1e' }}>
+      <AppShell.Navbar p="xs" className="dark-sidebar" style={{ background: '#1a1b1e', overflowY: 'auto' }}>
         {hasAnyOps && (
         <NavLink
           {...NL}
@@ -476,7 +475,6 @@ function AppLayout() {
           <Route path="/country-codes" element={<CountryCodes />} />
           <Route path="/configurations" element={<Configurations />} />
           <Route path="/amenities" element={<Amenities />} />
-          <Route path="/checkin" element={<CheckIn />} />
           <Route path="/checkout" element={<Checkout />} />
           <Route path="/reports/today" element={<TodayOverview />} />
           <Route path="/reports/revenue" element={<RevenueReport />} />

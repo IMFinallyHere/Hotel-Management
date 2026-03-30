@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { SimpleGrid, Card, Badge, Text, Group, TextInput, SegmentedControl, Loader, Center, Stack, Button, Modal, Select, NumberInput } from '@mantine/core';
+import { SimpleGrid, Card, Badge, Text, Group, TextInput, SegmentedControl, Loader, Center, Stack, Button, Modal, Select, NumberInput, Switch } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { useDisclosure } from '@mantine/hooks';
 import { IconSearch, IconPlus } from '@tabler/icons-react';
@@ -36,7 +36,7 @@ export default function RoomDashboard() {
   const [addOpened, { open: openAdd, close: closeAdd }] = useDisclosure(false);
 
   const addForm = useForm({
-    initialValues: { room_number: '', room_type: null, beds: 1, price: 0 },
+    initialValues: { room_number: '', room_type: null, beds: 1, price: 0, is_ac: false },
     validate: {
       room_number: (v) => v.trim() ? null : 'Required',
       room_type: (v) => v ? null : 'Required',
@@ -155,7 +155,13 @@ export default function RoomDashboard() {
                 <Text fw={700} size="lg">{room.room_number}</Text>
                 <Badge color={cfg.color} size="sm">{cfg.label}</Badge>
               </Group>
-              <Text c="dimmed" size="sm" mb={4}>{roomTypeMap[room.room_type] ?? '—'}</Text>
+              <Group gap={6} mb={4}>
+                <Text c="dimmed" size="sm">{roomTypeMap[room.room_type] ?? '—'}</Text>
+                {room.is_ac
+                  ? <Badge color="blue" size="xs">AC</Badge>
+                  : <Badge color="gray" variant="outline" size="xs">Non-AC</Badge>
+                }
+              </Group>
               <Text c="dimmed" size="sm">{room.beds} bed{room.beds !== 1 ? 's' : ''}</Text>
               {todayPrice != null ? (
                 <Group gap={6} mt="xs" align="center">
@@ -190,7 +196,13 @@ export default function RoomDashboard() {
             required
           />
           <NumberInput label="Beds" min={1} {...addForm.getInputProps('beds')} mb="sm" required />
-          <NumberInput label="Default Price (₹)" min={0} {...addForm.getInputProps('price')} mb="md" required />
+          <NumberInput label="Default Price (₹)" min={0} {...addForm.getInputProps('price')} mb="sm" required />
+          <Switch
+            label="AC Room"
+            checked={addForm.values.is_ac}
+            onChange={(e) => addForm.setFieldValue('is_ac', e.currentTarget.checked)}
+            mb="md"
+          />
           <Group justify="flex-end">
             <Button variant="default" onClick={closeAdd}>Cancel</Button>
             <Button type="submit" loading={addMutation.isPending}>Create</Button>

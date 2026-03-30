@@ -24,14 +24,15 @@ class Customers(models.Model):
         ('other', 'OTHER')
     ]
     name = models.CharField(max_length=100)
-    number = models.CharField(max_length=10, unique=True)
-    country_code = models.ForeignKey(CountryCodes, models.PROTECT)
-    address = models.CharField(max_length=300, null=True)
-    pincode = models.CharField(max_length=6, null=True)
-    gender = models.CharField(choices=GENDER, max_length=6)
-    identity_card_1 = models.FileField(null=True, blank=False, validators=[FileExtensionValidator(allowed_extensions=['pdf', 'jpeg', 'jpg', 'png']), validate_file_size])
-    identity_card_2 = models.FileField(null=True, blank=False, validators=[FileExtensionValidator(allowed_extensions=['pdf', 'jpeg', 'jpg', 'png']), validate_file_size])
+    number = models.CharField(max_length=10, unique=True, null=True, blank=True)
+    country_code = models.ForeignKey(CountryCodes, models.PROTECT, null=True, blank=True)
+    address = models.CharField(max_length=300, null=True, blank=True)
+    pincode = models.CharField(max_length=6, null=True, blank=True)
+    gender = models.CharField(choices=GENDER, max_length=6, null=True, blank=True)
+    identity_card_1 = models.FileField(null=True, blank=True, validators=[FileExtensionValidator(allowed_extensions=['pdf', 'jpeg', 'jpg', 'png']), validate_file_size])
+    identity_card_2 = models.FileField(null=True, blank=True, validators=[FileExtensionValidator(allowed_extensions=['pdf', 'jpeg', 'jpg', 'png']), validate_file_size])
     date_of_birth = models.DateField(null=True)
+    age = models.PositiveSmallIntegerField(null=True, blank=True)
     first_visit = models.DateTimeField(auto_now_add=True)
 
 
@@ -57,6 +58,7 @@ class Rooms(models.Model):
     room_type = models.ForeignKey(RoomType, models.PROTECT, 'rooms')
     beds = models.PositiveSmallIntegerField()
     price = models.DecimalField(max_digits=7, decimal_places=0)  # default price
+    is_ac = models.BooleanField(default=False)
 
     def is_occupied(self) -> bool:
         return self.logs.filter(check_out=None).exists()

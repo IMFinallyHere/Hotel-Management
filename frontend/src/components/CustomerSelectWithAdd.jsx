@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Group, Button, MultiSelect, Modal, TextInput, Select, Text, FileInput } from '@mantine/core';
+import { useState, useEffect } from 'react';
+import { Group, Button, MultiSelect, Modal, TextInput, Select, Text, FileInput, Grid, NumberInput } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
 import { useForm } from '@mantine/form';
 import { IconUserPlus, IconUpload } from '@tabler/icons-react';
@@ -10,6 +10,13 @@ import { QUERY_KEYS, fetchAllCustomers, fetchCountryCodes } from '../api/queries
 import { compressImage } from '../utils/imageUtils';
 import { notifySuccess, notifyError } from '../api/notify';
 import { parseApiError } from '../api/errorUtils';
+
+const GENDER_OPTIONS = [
+  { value: 'male', label: 'Male' },
+  { value: 'female', label: 'Female' },
+  { value: 'trans', label: 'Trans' },
+  { value: 'other', label: 'Other' },
+];
 
 function CustomerAddModal({ opened, onClose, onAdded }) {
   const qc = useQueryClient();
@@ -28,6 +35,7 @@ function CustomerAddModal({ opened, onClose, onAdded }) {
       country_code: null,
       gender: null,
       dob: null,
+      age: null,
       address: '',
       pincode: '',
       identity_card_1: null,
@@ -50,8 +58,18 @@ function CustomerAddModal({ opened, onClose, onAdded }) {
         if (v && !/^\d+$/.test(v)) return 'Pincode must contain only digits';
         return null;
       },
+      identity_card_1: (v) => v ? null : 'Required',
+      identity_card_2: (v) => v ? null : 'Required',
     },
   });
+
+  // Default country code to India (+91) when codes load
+  useEffect(() => {
+    if (countryCodes.length > 0 && !form.values.country_code) {
+      const india = countryCodes.find(c => c.country_code === 91);
+      if (india) form.setFieldValue('country_code', String(india.id));
+    }
+  }, [countryCodes]);
 
   const handleClose = () => {
     form.reset();
@@ -68,7 +86,11 @@ function CustomerAddModal({ opened, onClose, onAdded }) {
       fd.append('number', values.number.trim());
       fd.append('country_code', parseInt(values.country_code));
       fd.append('gender', values.gender);
-      if (values.dob) fd.append('date_of_birth', dayjs(values.dob).format('YYYY-MM-DD'));
+      if (values.dob) {
+        fd.append('date_of_birth', dayjs(values.dob).format('YYYY-MM-DD'));
+      } else if (values.age !== null && values.age !== undefined) {
+        fd.append('age', values.age);
+      }
       if (values.address.trim()) fd.append('address', values.address.trim());
       if (values.pincode.trim()) fd.append('pincode', values.pincode.trim());
       if (card1) fd.append('identity_card_1', card1);
@@ -86,74 +108,110 @@ function CustomerAddModal({ opened, onClose, onAdded }) {
   };
 
   return (
-    <Modal opened={opened} onClose={handleClose} title="Add New Customer" zIndex={300} size="lg">
+    <Modal opened={opened} onClose={handleClose} title="Add New Customer" zIndex={300} size="xl">
       <form onSubmit={form.onSubmit(handleSubmit)}>
-        <TextInput
-          label="Full Name"
-          {...form.getInputProps('name')}
-          mb="sm"
-          required
-          onKeyDown={(e) => {
-            if (!/^[A-Za-z\s]$/.test(e.key) && !['Backspace','Delete','ArrowLeft','ArrowRight','Tab'].includes(e.key))
-              e.preventDefault();
-          }}
-        />
-        <TextInput
-          label="Phone Number"
-          {...form.getInputProps('number')}
-          mb="sm"
-          required
-          onKeyDown={(e) => {
-            if (!/^\d$/.test(e.key) && !['Backspace','Delete','ArrowLeft','ArrowRight','Tab'].includes(e.key))
-              e.preventDefault();
-          }}
-        />
-        <Select
-          label="Country Code"
-          data={countryCodes.map(c => ({ value: String(c.id), label: `+${c.country_code} (${c.country_name})` }))}
-          searchable
-          {...form.getInputProps('country_code')}
-          mb="sm"
-          required
-        />
-        <Select
-          label="Gender"
-          data={[
-            { value: 'male', label: 'Male' },
-            { value: 'female', label: 'Female' },
-            { value: 'trans', label: 'Trans' },
-            { value: 'other', label: 'Other' },
-          ]}
-          {...form.getInputProps('gender')}
-          mb="sm"
-          required
-        />
-        <DatePickerInput label="Date of Birth (optional)" {...form.getInputProps('dob')} mb="sm" clearable />
-        <TextInput label="Address (optional)" {...form.getInputProps('address')} mb="sm" />
-        <TextInput
-          label="Pincode (optional)"
-          {...form.getInputProps('pincode')}
-          mb="sm"
-          onKeyDown={(e) => {
-            if (!/^\d$/.test(e.key) && !['Backspace','Delete','ArrowLeft','ArrowRight','Tab'].includes(e.key))
-              e.preventDefault();
-          }}
-        />
-        <FileInput
-          label="Identity Card 1 (optional)"
-          leftSection={<IconUpload size={14} />}
-          accept=".pdf,.jpg,.jpeg,.png"
-          {...form.getInputProps('identity_card_1')}
-          mb="sm"
-        />
-        <FileInput
-          label="Identity Card 2 (optional)"
-          leftSection={<IconUpload size={14} />}
-          accept=".pdf,.jpg,.jpeg,.png"
-          {...form.getInputProps('identity_card_2')}
-          mb="md"
-        />
-        <Group justify="flex-end">
+        <Grid gutter="sm">
+          {/* Row 1: Full Name | Phone Number */}
+          <Grid.Col span={{ base: 12, sm: 6 }}>
+            <TextInput
+              label="Full Name"
+              {...form.getInputProps('name')}
+              required
+              onKeyDown={(e) => {
+                if (!/^[A-Za-z\s]$/.test(e.key) && !['Backspace','Delete','ArrowLeft','ArrowRight','Tab'].includes(e.key))
+                  e.preventDefault();
+              }}
+            />
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, sm: 6 }}>
+            <TextInput
+              label="Phone Number"
+              maxLength={10}
+              {...form.getInputProps('number')}
+              required
+              onKeyDown={(e) => {
+                if (!/^\d$/.test(e.key) && !['Backspace','Delete','ArrowLeft','ArrowRight','Tab'].includes(e.key))
+                  e.preventDefault();
+              }}
+            />
+          </Grid.Col>
+
+          {/* Row 2: Gender | Country Code */}
+          <Grid.Col span={{ base: 12, sm: 6 }}>
+            <Select label="Gender" data={GENDER_OPTIONS} {...form.getInputProps('gender')} required />
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, sm: 6 }}>
+            <Select
+              label="Country Code"
+              data={countryCodes.map(c => ({ value: String(c.id), label: `+${c.country_code} ${c.country_name}` }))}
+              searchable
+              {...form.getInputProps('country_code')}
+              required
+            />
+          </Grid.Col>
+
+          {/* Row 3: DOB | Age */}
+          <Grid.Col span={{ base: 12, sm: 6 }}>
+            <DatePickerInput
+              label="Date of Birth"
+              {...form.getInputProps('dob')}
+              clearable
+              onChange={(date) => {
+                form.setFieldValue('dob', date);
+                form.setFieldValue('age', date ? dayjs().diff(dayjs(date), 'year') : null);
+              }}
+            />
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, sm: 6 }}>
+            <NumberInput
+              label="Age"
+              min={0}
+              max={120}
+              disabled={!!form.values.dob}
+              {...form.getInputProps('age')}
+            />
+          </Grid.Col>
+
+          {/* Row 4: Identity Card 1 | Identity Card 2 */}
+          <Grid.Col span={{ base: 12, sm: 6 }}>
+            <FileInput
+              label="Identity Card 1"
+              leftSection={<IconUpload size={14} />}
+              accept=".pdf,.jpg,.jpeg,.png"
+              {...form.getInputProps('identity_card_1')}
+              required
+            />
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, sm: 6 }}>
+            <FileInput
+              label="Identity Card 2"
+              leftSection={<IconUpload size={14} />}
+              accept=".pdf,.jpg,.jpeg,.png"
+              {...form.getInputProps('identity_card_2')}
+              required
+            />
+          </Grid.Col>
+
+          {/* Row 5: Address (full width) */}
+          <Grid.Col span={12}>
+            <TextInput label="Address" {...form.getInputProps('address')} />
+          </Grid.Col>
+
+          {/* Row 6: Pincode (full width) */}
+          <Grid.Col span={12}>
+            <TextInput
+              label="Pincode"
+              maxLength={6}
+              {...form.getInputProps('pincode')}
+              onKeyDown={(e) => {
+                if (!/^\d$/.test(e.key) && !['Backspace','Delete','ArrowLeft','ArrowRight','Tab'].includes(e.key))
+                  e.preventDefault();
+              }}
+            />
+          </Grid.Col>
+        </Grid>
+
+        <Group justify="flex-end" mt="md">
           <Button variant="default" onClick={handleClose}>Cancel</Button>
           <Button type="submit" loading={loading}>Add Customer</Button>
         </Group>

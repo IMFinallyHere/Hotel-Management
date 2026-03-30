@@ -1,13 +1,14 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   Tabs, Table, Card, Button, Badge, Stack, Group, Text, Loader, Center,
   NumberInput, TextInput, Select, Modal, Alert, ActionIcon, Textarea, SegmentedControl, Checkbox,
+  Grid, FileInput, Paper, Divider, Switch,
 } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
 import { useForm } from '@mantine/form';
 import { useDisclosure } from '@mantine/hooks';
 import { modals } from '@mantine/modals';
-import { IconArrowLeft, IconPlus, IconInfoCircle, IconPackage, IconTrash, IconLogout, IconBan } from '@tabler/icons-react';
+import { IconArrowLeft, IconPlus, IconInfoCircle, IconPackage, IconTrash, IconLogout, IconBan, IconUserPlus, IconUpload } from '@tabler/icons-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
@@ -15,12 +16,84 @@ import api from '../api/client';
 import {
   QUERY_KEYS, QUERY_KEYS_OPS,
   fetchRoom, fetchRooms, fetchActiveLogs, fetchRoomTypes, fetchRoomReservations,
-  fetchGroupCustomers, fetchAmenities, fetchConfigurations,
+  fetchGroupCustomers, fetchAmenities, fetchConfigurations, fetchCountryCodes,
 } from '../api/queries';
+import { compressImage } from '../utils/imageUtils';
+import CustomerSelectWithAdd from '../components/CustomerSelectWithAdd';
 import { notifySuccess, notifyError } from '../api/notify';
 import { parseApiError } from '../api/errorUtils';
-import CustomerSelectWithAdd from '../components/CustomerSelectWithAdd';
 import { parseConfigs, isLogOvertime, computeOvertimeFee, computeGst } from '../utils/configUtils';
+
+// ── Guest form helpers ─────────────────────────────────────────────────────────
+
+const GENDER_OPTIONS = [
+  { value: 'male', label: 'Male' },
+  { value: 'female', label: 'Female' },
+  { value: 'trans', label: 'Trans' },
+  { value: 'other', label: 'Other' },
+];
+
+function createEmptyGuest(countryCodeId = null) {
+  return {
+    _key: Date.now() + Math.random(),
+    name: '', number: '', country_code: countryCodeId,
+    gender: null, date_of_birth: null, age: null,
+    address: '', pincode: '',
+    identity_card_1: null, identity_card_2: null,
+    errors: {},
+  };
+}
+
+function GuestForm({ row, isMain, onChange }) {
+  return (
+    <Grid gutter="sm">
+      <Grid.Col span={{ base: 12, sm: 6 }}>
+        <TextInput
+          label="Full Name" value={row.name} required error={row.errors.name}
+          onChange={(e) => onChange('name', e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if (!/^[A-Za-z\s]$/.test(e.key) && !['Backspace','Delete','ArrowLeft','ArrowRight','Tab'].includes(e.key))
+              e.preventDefault();
+          }}
+        />
+      </Grid.Col>
+      <Grid.Col span={{ base: 12, sm: 6 }}>
+        <TextInput
+          label="Phone Number" maxLength={10} value={row.number}
+          required={isMain} error={row.errors.number}
+          onChange={(e) => onChange('number', e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if (!/^\d$/.test(e.key) && !['Backspace','Delete','ArrowLeft','ArrowRight','Tab'].includes(e.key))
+              e.preventDefault();
+          }}
+        />
+      </Grid.Col>
+      <Grid.Col span={{ base: 12, sm: 4 }}>
+        <Select label="Gender" data={GENDER_OPTIONS} value={row.gender} onChange={(v) => onChange('gender', v)} />
+      </Grid.Col>
+      <Grid.Col span={{ base: 12, sm: 4 }}>
+        <DatePickerInput
+          label="Date of Birth" value={row.date_of_birth} clearable
+          onChange={(date) => { onChange('date_of_birth', date); onChange('age', date ? dayjs().diff(dayjs(date), 'year') : null); }}
+        />
+      </Grid.Col>
+      <Grid.Col span={{ base: 12, sm: 4 }}>
+        <NumberInput label="Age" min={0} max={120} disabled={!!row.date_of_birth}
+          value={row.age ?? ''} onChange={(v) => onChange('age', v === '' ? null : v)} />
+      </Grid.Col>
+      <Grid.Col span={{ base: 12, sm: 6 }}>
+        <FileInput label="Identity Card 1" leftSection={<IconUpload size={14} />}
+          accept=".pdf,.jpg,.jpeg,.png" value={row.identity_card_1} required error={row.errors.identity_card_1}
+          onChange={(f) => onChange('identity_card_1', f)} />
+      </Grid.Col>
+      <Grid.Col span={{ base: 12, sm: 6 }}>
+        <FileInput label="Identity Card 2" leftSection={<IconUpload size={14} />}
+          accept=".pdf,.jpg,.jpeg,.png" value={row.identity_card_2} required error={row.errors.identity_card_2}
+          onChange={(f) => onChange('identity_card_2', f)} />
+      </Grid.Col>
+    </Grid>
+  );
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -179,10 +252,42 @@ function StatusTab({ room, activeLogs, isReservedToday }) {
   const configMap = parseConfigs(configs);
   const defaultCheckoutTime = configMap['default_checkout_time'] ?? '11:00';
 
-  const checkinForm = useForm({
-    initialValues: { customers: [], price: 0, extra_bed: 0, extra_per_bed_price: 0, nights: 1, gst_applied: true },
-    validate: { customers: (v) => v.length > 0 ? null : 'Select at least one customer.' },
-  });
+  // Check-in inline form state
+  const [guestRows, setGuestRows] = useState([createEmptyGuest()]);
+  const [checkinPrice, setCheckinPrice] = useState(0);
+  const [checkinExtraBed, setCheckinExtraBed] = useState(0);
+  const [checkinExtraPerBedPrice, setCheckinExtraPerBedPrice] = useState(0);
+  const [checkinCheckoutDate, setCheckinCheckoutDate] = useState(null);
+  const [checkinGstApplied, setCheckinGstApplied] = useState(true);
+  const [checkinError, setCheckinError] = useState(null);
+  const [checkinDateError, setCheckinDateError] = useState(null);
+  const [sharedCountryCode, setSharedCountryCode] = useState(null);
+  const [sharedAddress, setSharedAddress] = useState('');
+  const [sharedPincode, setSharedPincode] = useState('');
+
+  const { data: codes = [] } = useQuery({ queryKey: QUERY_KEYS.countryCodes, queryFn: fetchCountryCodes });
+  const indiaId = useMemo(() => {
+    const india = codes.find(c => c.country_code === 91);
+    return india ? String(india.id) : null;
+  }, [codes]);
+  useEffect(() => {
+    if (!indiaId) return;
+    setSharedCountryCode(prev => prev || indiaId);
+  }, [indiaId]);
+
+  const resetCheckinForm = () => {
+    setGuestRows([createEmptyGuest()]);
+    setCheckinPrice(0);
+    setCheckinExtraBed(0);
+    setCheckinExtraPerBedPrice(0);
+    setCheckinCheckoutDate(null);
+    setCheckinGstApplied(true);
+    setCheckinError(null);
+    setCheckinDateError(null);
+    setSharedCountryCode(indiaId);
+    setSharedAddress('');
+    setSharedPincode('');
+  };
 
   const activeLog = getActiveLog(room.id, activeLogs);
 
@@ -251,34 +356,83 @@ function StatusTab({ room, activeLogs, isReservedToday }) {
   });
 
   // ── Single-step check-in (item 4) ──
-  const handleCheckin = async (values) => {
-    const guestCount = values.customers.length;
-    const maxAllowed = room.beds + values.extra_bed;
-    if (guestCount > maxAllowed) {
-      notifyError(`Too many guests: ${guestCount} selected but max is ${maxAllowed} (${room.beds} beds + ${values.extra_bed} extra).`);
+  const handleCheckin = async () => {
+    let hasErrors = false;
+    if (!checkinCheckoutDate) { setCheckinDateError('Select a checkout date.'); hasErrors = true; }
+    else setCheckinDateError(null);
+
+    let guestsValid = true;
+    const updatedRows = guestRows.map((row, idx) => {
+      const errs = {};
+      if (!row.name?.trim()) errs.name = 'Required';
+      if (idx === 0 && !row.number?.trim()) errs.number = 'Required';
+      if (!row.identity_card_1) errs.identity_card_1 = 'Required';
+      if (!row.identity_card_2) errs.identity_card_2 = 'Required';
+      if (Object.keys(errs).length) guestsValid = false;
+      return { ...row, errors: errs };
+    });
+    setGuestRows(updatedRows);
+    if (!guestsValid || hasErrors) return;
+
+    const maxAllowed = room.beds + checkinExtraBed;
+    if (guestRows.length > maxAllowed) {
+      notifyError(`Too many guests: ${guestRows.length} selected but max is ${maxAllowed}.`);
       return;
     }
+
     setSubmitLoading(true);
+    setCheckinError(null);
+    const createdIds = [];
+
+    for (let i = 0; i < guestRows.length; i++) {
+      const row = guestRows[i];
+      try {
+        const card1 = row.identity_card_1 instanceof File ? await compressImage(row.identity_card_1) : null;
+        const card2 = row.identity_card_2 instanceof File ? await compressImage(row.identity_card_2) : null;
+        const fd = new FormData();
+        fd.append('name', row.name.trim());
+        if (row.number?.trim()) fd.append('number', row.number.trim());
+        if (sharedCountryCode) fd.append('country_code', parseInt(sharedCountryCode));
+        if (row.gender) fd.append('gender', row.gender);
+        if (row.date_of_birth) {
+          fd.append('date_of_birth', dayjs(row.date_of_birth).format('YYYY-MM-DD'));
+        } else if (row.age !== null && row.age !== undefined) {
+          fd.append('age', row.age);
+        }
+        if (sharedAddress?.trim()) fd.append('address', sharedAddress.trim());
+        if (sharedPincode?.trim()) fd.append('pincode', sharedPincode.trim());
+        if (card1) fd.append('identity_card_1', card1);
+        if (card2) fd.append('identity_card_2', card2);
+        const { data } = await api.post('/v1/customers/', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+        createdIds.push(data.id);
+      } catch (e) {
+        const label = i === 0 ? 'Main Guest' : `Guest ${i + 1}`;
+        setCheckinError(`${label}: ${parseApiError(e, 'Failed to save customer.')}`);
+        setSubmitLoading(false);
+        return;
+      }
+    }
+
     try {
-      const { data: groupData } = await api.post('/v1/group/customers/', { customers: values.customers.map(Number) });
+      const { data: groupData } = await api.post('/v1/group/customers/', { customers: createdIds });
       const [h, m] = defaultCheckoutTime.split(':').map(Number);
-      const expectedCheckout = dayjs().add(values.nights, 'day').hour(h).minute(m).second(0).format('YYYY-MM-DDTHH:mm:ss');
+      const expectedCheckout = dayjs(checkinCheckoutDate).hour(h).minute(m).second(0).format('YYYY-MM-DDTHH:mm:ss');
       await api.post('/v1/checkin/', {
         room: room.id,
         group: groupData.group_id,
-        price: values.price,
-        extra_bed: values.extra_bed,
-        extra_per_bed_price: values.extra_per_bed_price,
+        price: checkinPrice,
+        extra_bed: checkinExtraBed,
+        extra_per_bed_price: checkinExtraPerBedPrice,
         expected_checkout: expectedCheckout,
-        gst_applied: values.gst_applied,
+        gst_applied: checkinGstApplied,
       });
       qc.invalidateQueries(QUERY_KEYS.activeLogs);
       qc.invalidateQueries(QUERY_KEYS.rooms);
       setShowForm(false);
-      checkinForm.reset();
+      resetCheckinForm();
       notifySuccess('Check-in successful.');
     } catch (e) {
-      notifyError(parseApiError(e, 'Check-in failed.'));
+      setCheckinError(parseApiError(e, 'Check-in failed.'));
     } finally {
       setSubmitLoading(false);
     }
@@ -625,52 +779,123 @@ function StatusTab({ room, activeLogs, isReservedToday }) {
     );
   }
 
-  // ── Single check-in form (item 4) ──
-  const guestCount = checkinForm.values.customers.length;
-  const maxAllowed = room.beds + checkinForm.values.extra_bed;
-  const guestExceeded = guestCount > maxAllowed;
+  // ── Inline check-in form (item 4) ──
+  const ciNights = checkinCheckoutDate ? dayjs(checkinCheckoutDate).diff(dayjs().startOf('day'), 'day') : 0;
+  const ciMaxAllowed = room.beds + checkinExtraBed;
+  const ciGuestExceeded = guestRows.length > ciMaxAllowed;
 
   return (
-    <Card withBorder maw={500}>
+    <Card withBorder maw={720}>
       <Text fw={600} mb="md">Check-In</Text>
-      <form onSubmit={checkinForm.onSubmit(handleCheckin)}>
-        <CustomerSelectWithAdd
-          label="Customers"
-          value={checkinForm.values.customers}
-          onChange={(val) => checkinForm.setFieldValue('customers', val)}
-          error={checkinForm.errors.customers}
-          maxValues={maxAllowed}
-          helperText={`${guestCount} of ${maxAllowed} guest${maxAllowed !== 1 ? 's' : ''} selected`}
-          required
-        />
-        <NumberInput
-          label="Price (₹, 0 = auto)"
-          min={0}
-          {...checkinForm.getInputProps('price')}
-          mt="sm"
-          mb="sm"
-          placeholder={String(room.price)}
-        />
-        <NumberInput label="Extra Beds" min={0} {...checkinForm.getInputProps('extra_bed')} mb="sm" />
-        <NumberInput label="Price per Extra Bed (₹)" min={0} {...checkinForm.getInputProps('extra_per_bed_price')} mb="sm" />
-        <NumberInput label="Nights" min={1} {...checkinForm.getInputProps('nights')} mb="sm" />
-        <Checkbox
-          label={`Apply GST (${configMap['gst_percent'] ?? '0'}%)`}
-          checked={checkinForm.values.gst_applied}
-          onChange={(e) => checkinForm.setFieldValue('gst_applied', e.currentTarget.checked)}
-          mb="sm"
-        />
-        <Text size="xs" c="dimmed" mb="sm">
-          Departure: {dayjs().add(checkinForm.values.nights, 'day').format('DD MMM YYYY')} at {defaultCheckoutTime}
+
+      {/* Room & Stay Details */}
+      <Text fw={500} size="sm" mb="sm">Room & Stay Details</Text>
+      <Grid gutter="sm" mb="md">
+        <Grid.Col span={{ base: 12, sm: 6 }}>
+          <NumberInput label="Price (₹, 0 = auto)" min={0} value={checkinPrice}
+            onChange={setCheckinPrice} placeholder={String(room.price)} />
+        </Grid.Col>
+        <Grid.Col span={{ base: 12, sm: 6 }}>
+          <NumberInput label="Extra Beds" min={0} value={checkinExtraBed} onChange={setCheckinExtraBed} />
+        </Grid.Col>
+        <Grid.Col span={{ base: 12, sm: 6 }}>
+          <NumberInput label="Price per Extra Bed (₹)" min={0} value={checkinExtraPerBedPrice} onChange={setCheckinExtraPerBedPrice} />
+        </Grid.Col>
+        <Grid.Col span={{ base: 12, sm: 6 }}>
+          <DatePickerInput
+            type="range"
+            label="Check-in → Checkout"
+            value={[new Date(), checkinCheckoutDate]}
+            onChange={([, end]) => { setCheckinCheckoutDate(end ?? null); setCheckinDateError(null); }}
+            minDate={new Date(new Date().setDate(new Date().getDate() + 1))}
+            required
+            error={checkinDateError}
+          />
+          {checkinCheckoutDate && (
+            <Text size="xs" c="dimmed" mt={4}>
+              Departure: {dayjs(checkinCheckoutDate).format('DD MMM YYYY')} at {defaultCheckoutTime} ({ciNights} night{ciNights !== 1 ? 's' : ''})
+            </Text>
+          )}
+        </Grid.Col>
+        <Grid.Col span={12}>
+          <Checkbox
+            label={`Apply GST (${configMap['gst_percent'] ?? '0'}%)`}
+            checked={checkinGstApplied}
+            onChange={(e) => setCheckinGstApplied(e.currentTarget.checked)}
+          />
+        </Grid.Col>
+      </Grid>
+
+      <Divider mb="md" />
+
+      {/* Guest Details */}
+      <Text fw={500} size="sm" mb="sm">Guest Details</Text>
+      <Stack gap="md" mb="md">
+        {guestRows.map((row, idx) => (
+          <Paper key={row._key} withBorder p="md" radius="md">
+            <Group justify="space-between" mb="sm">
+              <Text size="sm" fw={600}>{idx === 0 ? 'Main Guest' : `Guest ${idx + 1}`}</Text>
+              {idx > 0 && (
+                <ActionIcon color="red" variant="light" size="sm"
+                  onClick={() => setGuestRows(rows => rows.filter((_, i) => i !== idx))}>
+                  <IconTrash size={14} />
+                </ActionIcon>
+              )}
+            </Group>
+            <GuestForm
+              row={row} isMain={idx === 0}
+              onChange={(field, val) => setGuestRows(rows => rows.map((r, i) => i === idx ? { ...r, [field]: val } : r))}
+            />
+          </Paper>
+        ))}
+        <div>
+          <Button size="xs" variant="light" leftSection={<IconUserPlus size={14} />}
+            disabled={guestRows.length >= ciMaxAllowed}
+            onClick={() => setGuestRows(rows => [...rows, createEmptyGuest()])}>
+            Add Guest
+          </Button>
+        </div>
+      </Stack>
+
+      {/* Contact Details (shared across all guests) */}
+      <Paper withBorder p="md" radius="md" mb="md">
+        <Text size="sm" fw={600} mb="sm">Contact Details</Text>
+        <Grid gutter="sm">
+          <Grid.Col span={{ base: 12, sm: 6 }}>
+            <Select
+              label="Country Code" searchable value={sharedCountryCode}
+              data={codes.map(c => ({ value: String(c.id), label: `+${c.country_code} ${c.country_name}` }))}
+              onChange={setSharedCountryCode}
+            />
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, sm: 6 }}>
+            <TextInput
+              label="Pincode" maxLength={6} value={sharedPincode}
+              onChange={(e) => setSharedPincode(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if (!/^\d$/.test(e.key) && !['Backspace','Delete','ArrowLeft','ArrowRight','Tab'].includes(e.key))
+                  e.preventDefault();
+              }}
+            />
+          </Grid.Col>
+          <Grid.Col span={12}>
+            <TextInput label="Address" value={sharedAddress}
+              onChange={(e) => setSharedAddress(e.currentTarget.value)} />
+          </Grid.Col>
+        </Grid>
+      </Paper>
+
+      {ciGuestExceeded && (
+        <Text size="sm" c="red" mt="sm">
+          Too many guests: {guestRows.length} selected but max is {ciMaxAllowed} ({room.beds} bed{room.beds !== 1 ? 's' : ''} + {checkinExtraBed} extra).
         </Text>
-        <Text size="sm" c={guestExceeded ? 'red' : 'dimmed'} mb="md">
-          {guestCount} guest{guestCount !== 1 ? 's' : ''} selected — {room.beds} bed{room.beds !== 1 ? 's' : ''} + {checkinForm.values.extra_bed} extra = max {maxAllowed}
-        </Text>
-        <Group>
-          <Button variant="default" onClick={() => { setShowForm(false); checkinForm.reset(); }}>Cancel</Button>
-          <Button type="submit" loading={submitLoading} disabled={guestExceeded}>Confirm Check-In</Button>
-        </Group>
-      </form>
+      )}
+      {checkinError && <Alert color="red" title="Error" mt="sm">{checkinError}</Alert>}
+
+      <Group mt="md">
+        <Button variant="default" onClick={() => { setShowForm(false); resetCheckinForm(); }}>Cancel</Button>
+        <Button loading={submitLoading} disabled={ciGuestExceeded} onClick={handleCheckin}>Confirm Check-In</Button>
+      </Group>
     </Card>
   );
 }
@@ -836,6 +1061,7 @@ function RoomDetailsTab({ room }) {
       room_type: room.room_type ? String(room.room_type) : null,
       beds: room.beds,
       price: room.price,
+      is_ac: room.is_ac ?? false,
     },
     validate: {
       room_number: (v) => v ? null : 'Required',
@@ -868,7 +1094,13 @@ function RoomDetailsTab({ room }) {
             required
           />
           <NumberInput label="Beds" min={1} {...form.getInputProps('beds')} mb="sm" required />
-          <NumberInput label="Default Price (₹)" min={0} {...form.getInputProps('price')} mb="md" required />
+          <NumberInput label="Default Price (₹)" min={0} {...form.getInputProps('price')} mb="sm" required />
+          <Switch
+            label="AC Room"
+            checked={form.values.is_ac}
+            onChange={(e) => form.setFieldValue('is_ac', e.currentTarget.checked)}
+            mb="md"
+          />
           <Button type="submit" loading={saveMutation.isPending}>Save</Button>
         </form>
     </Card>
@@ -1023,6 +1255,10 @@ export default function RoomDetail() {
           {activeLog && isLogOvertime(activeLog) && (
             <Badge color="yellow" size="sm" ml="xs">Overtime</Badge>
           )}
+          {room.is_ac
+            ? <Badge color="blue" size="sm" ml="xs">AC</Badge>
+            : <Badge color="gray" variant="outline" size="sm" ml="xs">Non-AC</Badge>
+          }
         </div>
         {activeLog && (
           <Group gap="xs" style={{ marginLeft: 'clamp(16px, 8vw, 130px)' }}>

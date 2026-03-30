@@ -15,7 +15,7 @@ class RoomTypeSerializer(serializers.ModelSerializer):
 class RoomSerializer(serializers.ModelSerializer):
     class Meta:
         model = Rooms
-        fields = ['id', 'room_number', 'room_type', 'beds', 'price']
+        fields = ['id', 'room_number', 'room_type', 'beds', 'price', 'is_ac']
 
 
 class CountryCodeSerializer(serializers.ModelSerializer):
@@ -28,7 +28,7 @@ class CustomerSerializer(serializers.ModelSerializer):
     class Meta:
         model = Customers
         fields = ['id', 'name', 'number', 'country_code', 'address', 'pincode', 'gender',
-                  'identity_card_1', 'identity_card_2', 'date_of_birth', 'first_visit']
+                  'identity_card_1', 'identity_card_2', 'date_of_birth', 'age', 'first_visit']
 
 
 class ConfigurationSerializer(serializers.ModelSerializer):
