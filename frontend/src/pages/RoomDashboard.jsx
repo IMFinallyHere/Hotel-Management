@@ -76,6 +76,10 @@ export default function RoomDashboard() {
   const occupiedPriceMap = Object.fromEntries(
     activeLogs.filter(l => l.check_out === null).map(l => [l.room, l.price])
   );
+  // roomId → active log (for is_ac override)
+  const activeLogMap = Object.fromEntries(
+    activeLogs.filter(l => l.check_out === null).map(l => [l.room, l])
+  );
   const reservedIds = new Set(
     reservations
       .filter(r => r.check_in_date <= today && r.check_out_date >= today)
@@ -157,10 +161,13 @@ export default function RoomDashboard() {
               </Group>
               <Group gap={6} mb={4}>
                 <Text c="dimmed" size="sm">{roomTypeMap[room.room_type] ?? '—'}</Text>
-                {room.is_ac
-                  ? <Badge color="blue" size="xs">AC</Badge>
-                  : <Badge color="gray" variant="outline" size="xs">Non-AC</Badge>
-                }
+                {(() => {
+                  const log = activeLogMap[room.id];
+                  const isAc = log ? (log.is_ac ?? room.is_ac) : room.is_ac;
+                  return isAc
+                    ? <Badge color="blue" size="xs">AC</Badge>
+                    : <Badge color="gray" variant="outline" size="xs">Non-AC</Badge>;
+                })()}
               </Group>
               <Text c="dimmed" size="sm">{room.beds} bed{room.beds !== 1 ? 's' : ''}</Text>
               {todayPrice != null ? (

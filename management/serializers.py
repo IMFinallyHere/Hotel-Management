@@ -46,11 +46,12 @@ class RoomsPriceChartSerializer(serializers.ModelSerializer):
 class CheckinSerializer(serializers.ModelSerializer):
     class Meta:
         model = RoomStayLogs
-        fields = ['room', 'price', 'group', 'extra_bed', 'extra_per_bed_price', 'expected_checkout', 'gst_applied']
+        fields = ['room', 'price', 'group', 'extra_bed', 'extra_per_bed_price', 'expected_checkout', 'gst_applied', 'is_ac']
         extra_kwargs = {
             'price': {'required': False, 'default': 0},
             'expected_checkout': {'required': False},
             'gst_applied': {'required': False, 'default': False},
+            'is_ac': {'required': False, 'default': None},
         }
 
     @staticmethod
@@ -87,7 +88,7 @@ class StayLogSerializer(serializers.ModelSerializer):
         model = RoomStayLogs
         fields = ['id', 'room', 'group', 'check_in', 'check_out', 'price', 'extra_bed', 'extra_per_bed_price', 'is_nc',
                   'expected_checkout', 'overtime_rate', 'grace_until', 'is_early_checkin', 'gst_applied',
-                  'shifted_from', 'shift_reason']
+                  'shifted_from', 'shift_reason', 'is_ac']
 
 
 class StayLogUpdateSerializer(serializers.ModelSerializer):
@@ -290,3 +291,4 @@ class ShiftRoomSerializer(serializers.Serializer):
     apply_extra_beds = serializers.BooleanField(default=True)
     extra_bed = serializers.IntegerField(min_value=0, required=False)
     extra_per_bed_price = serializers.DecimalField(max_digits=7, decimal_places=0, required=False)
+    price = serializers.DecimalField(max_digits=7, decimal_places=0, required=False)

@@ -47,6 +47,15 @@ class RoomDetail(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = RoomSerializer
     permission_classes = [DjangoModelPermissions]
 
+    def destroy(self, request, *args, **kwargs):
+        room = self.get_object()
+        if room.logs.exists() or room.reservations.exists() or room.price_chart.exists():
+            return Response(
+                {'error': 'Cannot delete room with existing stays, reservations, or price chart entries.'},
+                status=400,
+            )
+        return super().destroy(request, *args, **kwargs)
+
 
 class CountryCodeListCreate(generics.ListCreateAPIView):
     queryset = CountryCodes.objects.all()
@@ -1554,7 +1563,7 @@ class ShiftRoom(APIView):
         new_log = RoomStayLogs(
             room=new_room,
             group=log.group,
-            price=log.price,
+            price=serializer.validated_data.get('price', log.price),
             extra_bed=extra_bed,
             extra_per_bed_price=extra_per_bed_price,
             is_nc=log.is_nc,
@@ -1562,6 +1571,7 @@ class ShiftRoom(APIView):
             overtime_rate=log.overtime_rate,
             is_early_checkin=log.is_early_checkin,
             gst_applied=log.gst_applied,
+            is_ac=log.is_ac,
             shifted_from=log.room,
             shift_reason=reason,
         )

@@ -89,6 +89,7 @@ class RoomStayLogs(models.Model):
     gst_applied = models.BooleanField(default=False)
     shifted_from = models.ForeignKey('Rooms', models.SET_NULL, null=True, blank=True, related_name='shift_destinations')
     shift_reason = models.TextField(null=True, blank=True)
+    is_ac = models.BooleanField(null=True, blank=True)
 
 
 class Configurations(models.Model):

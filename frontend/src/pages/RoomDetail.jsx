@@ -81,15 +81,25 @@ function GuestForm({ row, isMain, onChange }) {
         <NumberInput label="Age" min={0} max={120} disabled={!!row.date_of_birth}
           value={row.age ?? ''} onChange={(v) => onChange('age', v === '' ? null : v)} />
       </Grid.Col>
-      <Grid.Col span={{ base: 12, sm: 6 }}>
-        <FileInput label="Identity Card 1" leftSection={<IconUpload size={14} />}
-          accept=".pdf,.jpg,.jpeg,.png" value={row.identity_card_1} required error={row.errors.identity_card_1}
-          onChange={(f) => onChange('identity_card_1', f)} />
-      </Grid.Col>
-      <Grid.Col span={{ base: 12, sm: 6 }}>
-        <FileInput label="Identity Card 2" leftSection={<IconUpload size={14} />}
-          accept=".pdf,.jpg,.jpeg,.png" value={row.identity_card_2} required error={row.errors.identity_card_2}
-          onChange={(f) => onChange('identity_card_2', f)} />
+      <Grid.Col span={12}>
+        <FileInput
+          label="Identity Cards (select up to 2)"
+          leftSection={<IconUpload size={14} />}
+          accept=".pdf,.jpg,.jpeg,.png"
+          multiple
+          value={[row.identity_card_1, row.identity_card_2].filter(Boolean)}
+          required
+          error={row.errors.identity_card_1 || row.errors.identity_card_2}
+          onChange={(files) => {
+            onChange('identity_card_1', files[0] ?? null);
+            onChange('identity_card_2', files[1] ?? null);
+          }}
+        />
+        {(row.identity_card_1 || row.identity_card_2) && (
+          <Text size="xs" c="dimmed" mt={4}>
+            {[row.identity_card_1?.name, row.identity_card_2?.name].filter(Boolean).join(' • ')}
+          </Text>
+        )}
       </Grid.Col>
     </Grid>
   );
@@ -259,6 +269,7 @@ function StatusTab({ room, activeLogs, isReservedToday }) {
   const [checkinExtraPerBedPrice, setCheckinExtraPerBedPrice] = useState(0);
   const [checkinCheckoutDate, setCheckinCheckoutDate] = useState(null);
   const [checkinGstApplied, setCheckinGstApplied] = useState(true);
+  const [checkinIsAc, setCheckinIsAc] = useState(room.is_ac);
   const [checkinError, setCheckinError] = useState(null);
   const [checkinDateError, setCheckinDateError] = useState(null);
   const [sharedCountryCode, setSharedCountryCode] = useState(null);
@@ -282,6 +293,7 @@ function StatusTab({ room, activeLogs, isReservedToday }) {
     setCheckinExtraPerBedPrice(0);
     setCheckinCheckoutDate(null);
     setCheckinGstApplied(true);
+    setCheckinIsAc(room.is_ac);
     setCheckinError(null);
     setCheckinDateError(null);
     setSharedCountryCode(indiaId);
@@ -425,6 +437,7 @@ function StatusTab({ room, activeLogs, isReservedToday }) {
         extra_per_bed_price: checkinExtraPerBedPrice,
         expected_checkout: expectedCheckout,
         gst_applied: checkinGstApplied,
+        is_ac: checkinIsAc,
       });
       qc.invalidateQueries(QUERY_KEYS.activeLogs);
       qc.invalidateQueries(QUERY_KEYS.rooms);
@@ -817,11 +830,18 @@ function StatusTab({ room, activeLogs, isReservedToday }) {
             </Text>
           )}
         </Grid.Col>
-        <Grid.Col span={12}>
+        <Grid.Col span={{ base: 12, sm: 6 }}>
           <Checkbox
             label={`Apply GST (${configMap['gst_percent'] ?? '0'}%)`}
             checked={checkinGstApplied}
             onChange={(e) => setCheckinGstApplied(e.currentTarget.checked)}
+          />
+        </Grid.Col>
+        <Grid.Col span={{ base: 12, sm: 6 }}>
+          <Switch
+            label="AC Room"
+            checked={checkinIsAc ?? false}
+            onChange={(e) => setCheckinIsAc(e.currentTarget.checked)}
           />
         </Grid.Col>
       </Grid>
@@ -1053,6 +1073,7 @@ function ReservationsTab({ room, reservations, isOccupied, configMap = {} }) {
 
 function RoomDetailsTab({ room }) {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const { data: roomTypes = [] } = useQuery({ queryKey: QUERY_KEYS.roomTypes, queryFn: fetchRoomTypes });
 
   const form = useForm({
@@ -1082,6 +1103,24 @@ function RoomDetailsTab({ room }) {
     onError: (e) => notifyError(parseApiError(e, 'Failed to save.')),
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: () => api.delete(`/v1/room/${room.id}/`),
+    onSuccess: () => {
+      qc.invalidateQueries(QUERY_KEYS.rooms);
+      notifySuccess('Room deleted.');
+      navigate('/rooms');
+    },
+    onError: (e) => notifyError(parseApiError(e, 'Failed to delete room.')),
+  });
+
+  const handleDelete = () => modals.openConfirmModal({
+    title: 'Delete Room',
+    children: <Text size="sm">This will permanently delete Room {room.room_number}. This cannot be undone.</Text>,
+    labels: { confirm: 'Delete', cancel: 'Cancel' },
+    confirmProps: { color: 'red' },
+    onConfirm: () => deleteMutation.mutate(),
+  });
+
   return (
     <Card withBorder maw={500}>
         <form onSubmit={form.onSubmit(v => saveMutation.mutate(v))}>
@@ -1101,7 +1140,12 @@ function RoomDetailsTab({ room }) {
             onChange={(e) => form.setFieldValue('is_ac', e.currentTarget.checked)}
             mb="md"
           />
-          <Button type="submit" loading={saveMutation.isPending}>Save</Button>
+          <Group justify="space-between">
+            <Button type="submit" loading={saveMutation.isPending}>Save</Button>
+            <Button color="red" variant="light" onClick={handleDelete} loading={deleteMutation.isPending}>
+              Delete Room
+            </Button>
+          </Group>
         </form>
     </Card>
   );
@@ -1140,6 +1184,7 @@ export default function RoomDetail() {
   const [shiftOpened, { open: openShift, close: closeShift }] = useDisclosure(false);
   const [shiftRoomId, setShiftRoomId] = useState(null);
   const [shiftReason, setShiftReason] = useState('');
+  const [shiftPrice, setShiftPrice] = useState(0);
   const [applyExtraBeds, setApplyExtraBeds] = useState(true);
   const [shiftExtraBed, setShiftExtraBed] = useState(0);
   const [shiftExtraBedPrice, setShiftExtraBedPrice] = useState(0);
@@ -1149,8 +1194,8 @@ export default function RoomDetail() {
   const [payCheckoutType, setPayCheckoutType] = useState(null);
 
   const shiftMutation = useMutation({
-    mutationFn: ({ logId, new_room, reason, apply_extra_beds, extra_bed, extra_per_bed_price }) =>
-      api.post(`/v1/stay-logs/${logId}/shift/`, { new_room, reason, apply_extra_beds, extra_bed, extra_per_bed_price }),
+    mutationFn: ({ logId, new_room, reason, price, apply_extra_beds, extra_bed, extra_per_bed_price }) =>
+      api.post(`/v1/stay-logs/${logId}/shift/`, { new_room, reason, price, apply_extra_beds, extra_bed, extra_per_bed_price }),
     onSuccess: (res) => {
       qc.invalidateQueries(QUERY_KEYS.activeLogs);
       qc.invalidateQueries(QUERY_KEYS.rooms);
@@ -1230,6 +1275,7 @@ export default function RoomDetail() {
   const handleOpenShift = () => {
     setShiftRoomId(null);
     setShiftReason('');
+    setShiftPrice(activeLog ? Number(activeLog.price) : 0);
     setApplyExtraBeds(activeLog ? activeLog.extra_bed > 0 : false);
     setShiftExtraBed(activeLog ? activeLog.extra_bed : 0);
     setShiftExtraBedPrice(activeLog ? Number(activeLog.extra_per_bed_price) : 0);
@@ -1255,7 +1301,7 @@ export default function RoomDetail() {
           {activeLog && isLogOvertime(activeLog) && (
             <Badge color="yellow" size="sm" ml="xs">Overtime</Badge>
           )}
-          {room.is_ac
+          {(activeLog ? (activeLog.is_ac ?? room.is_ac) : room.is_ac)
             ? <Badge color="blue" size="sm" ml="xs">AC</Badge>
             : <Badge color="gray" variant="outline" size="sm" ml="xs">Non-AC</Badge>
           }
@@ -1282,11 +1328,13 @@ export default function RoomDetail() {
           searchable
           mb="xs"
         />
-        {activeLog && (
-          <Text size="xs" c="dimmed" mb="sm">
-            Price ₹{activeLog.price}/night from current room will be carried over (not the new room's default).
-          </Text>
-        )}
+        <NumberInput
+          label="Price (₹/night)"
+          min={0}
+          value={shiftPrice}
+          onChange={setShiftPrice}
+          mb="sm"
+        />
         {activeLog?.extra_bed > 0 && (
           <>
             <Checkbox
@@ -1322,6 +1370,7 @@ export default function RoomDetail() {
               logId: activeLog.id,
               new_room: Number(shiftRoomId),
               reason: shiftReason,
+              price: shiftPrice,
               apply_extra_beds: applyExtraBeds,
               extra_bed: shiftExtraBed,
               extra_per_bed_price: shiftExtraBedPrice,
