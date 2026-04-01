@@ -3,7 +3,7 @@ from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, RoomsPriceChart, Reservation, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense
+from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, RoomsPriceChart, Reservation, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense
 
 
 class RoomTypeSerializer(serializers.ModelSerializer):
@@ -101,10 +101,39 @@ class GroupCustomerSerializer(serializers.Serializer):
     customers = serializers.ListSerializer(child=serializers.PrimaryKeyRelatedField(queryset=Customers.objects.all()), required=True, allow_null=False, allow_empty=False)
 
 
+class ReservationReminderSerializer(serializers.ModelSerializer):
+    room_number = serializers.SerializerMethodField()
+    check_in_date = serializers.SerializerMethodField()
+    is_dismissed = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ReservationReminder
+        fields = ['id', 'reservation', 'days_before', 'is_dismissed', 'created_on', 'room_number', 'check_in_date']
+
+    def get_room_number(self, obj):
+        return obj.reservation.room.room_number
+
+    def get_check_in_date(self, obj):
+        return str(obj.reservation.check_in_date)
+
+    def get_is_dismissed(self, obj):
+        request = self.context.get('request')
+        if not request:
+            return False
+        return obj.dismissed_by.filter(pk=request.user.pk).exists()
+
+
 class ReservationSerializer(serializers.ModelSerializer):
+    reminders = serializers.SerializerMethodField()
+
+    def get_reminders(self, obj):
+        request = self.context.get('request')
+        qs = obj.reminders.all()
+        return ReservationReminderSerializer(qs, many=True, context={'request': request}).data
+
     class Meta:
         model = Reservation
-        fields = ['id', 'room', 'group', 'check_in_date', 'check_out_date', 'price', 'created_on']
+        fields = ['id', 'room', 'group', 'check_in_date', 'check_out_date', 'price', 'created_on', 'reminders']
 
     def validate(self, attrs):
         check_in = attrs.get('check_in_date')

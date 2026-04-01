@@ -17,6 +17,7 @@ const REPORT_KEYS = [
   'view_staff_sales_report',
   'view_cash_reconciliation',
   'view_expense_report',
+  'view_reservationreminder',
 ];
 
 const ADMIN_KEYS = [

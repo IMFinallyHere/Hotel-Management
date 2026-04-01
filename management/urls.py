@@ -15,7 +15,8 @@ from .views import (RoomTypeListCreate, RoomTypeDetail, RoomListCreate, RoomDeta
                     CashWithdrawalListCreate, CashWithdrawalDetail, CashWithdrawalApprove, CashWithdrawalReject,
                     ExpenseListCreate, ExpenseDetail,
                     PLReportView, StaffSalesView, CashReconciliationView, ExpenseReportView,
-                    ExtendStay, GrantGrace, ShiftRoom, GSTReportView, StayLogHistory)
+                    ExtendStay, GrantGrace, ShiftRoom, GSTReportView, StayLogHistory,
+                    ReservationReminderListCreate, ReservationReminderDetail)
 from .auth_views import UserListCreate, UserDetail, GroupListCreate, GroupDetail, PermissionListView
 
 
@@ -78,6 +79,8 @@ urlpatterns = [
     path('finance/staff-sales/', StaffSalesView.as_view(), name='finance-staff-sales'),
     path('finance/cash-reconciliation/', CashReconciliationView.as_view(), name='finance-cash-reconciliation'),
     path('finance/expenses/', ExpenseReportView.as_view(), name='finance-expenses'),
+    path('reminders/', ReservationReminderListCreate.as_view(), name='reminder-list-create'),
+    path('reminder/<int:pk>/', ReservationReminderDetail.as_view(), name='reminder-detail'),
     path('user/permissions/', UserPermissionsView.as_view(), name='user-permissions'),
     path('users/', UserListCreate.as_view(), name='user-list-create'),
     path('users/<int:pk>/', UserDetail.as_view(), name='user-detail'),

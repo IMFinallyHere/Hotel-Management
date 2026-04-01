@@ -11,6 +11,76 @@ import { compressImage } from '../utils/imageUtils';
 import { notifySuccess, notifyError } from '../api/notify';
 import { parseApiError } from '../api/errorUtils';
 
+function SimpleCustomerAddModal({ opened, onClose, onAdded }) {
+  const qc = useQueryClient();
+  const [loading, setLoading] = useState(false);
+
+  const form = useForm({
+    initialValues: { name: '', number: '' },
+    validate: {
+      name: (v) => {
+        if (!v || !v.trim()) return 'Required';
+        if (!/^[A-Za-z\s]+$/.test(v.trim())) return 'Name must contain only letters';
+        return null;
+      },
+      number: (v) => {
+        if (!v || !v.trim()) return 'Required';
+        if (!/^\d+$/.test(v)) return 'Phone must contain only digits';
+        return null;
+      },
+    },
+  });
+
+  const handleClose = () => { form.reset(); onClose(); };
+
+  const handleSubmit = async (values) => {
+    setLoading(true);
+    try {
+      const { data } = await api.post('/v1/customers/', { name: values.name.trim(), number: values.number.trim() });
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.customers });
+      notifySuccess(`Customer "${data.name}" added.`);
+      onAdded(data);
+      handleClose();
+    } catch (e) {
+      notifyError(parseApiError(e, 'Failed to add customer.'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Modal opened={opened} onClose={handleClose} title="Add New Guest" zIndex={300}>
+      <form onSubmit={form.onSubmit(handleSubmit)}>
+        <TextInput
+          label="Full Name"
+          {...form.getInputProps('name')}
+          required
+          mb="sm"
+          onKeyDown={(e) => {
+            if (!/^[A-Za-z\s]$/.test(e.key) && !['Backspace','Delete','ArrowLeft','ArrowRight','Tab'].includes(e.key))
+              e.preventDefault();
+          }}
+        />
+        <TextInput
+          label="Phone Number"
+          maxLength={10}
+          {...form.getInputProps('number')}
+          required
+          mb="md"
+          onKeyDown={(e) => {
+            if (!/^\d$/.test(e.key) && !['Backspace','Delete','ArrowLeft','ArrowRight','Tab'].includes(e.key))
+              e.preventDefault();
+          }}
+        />
+        <Group justify="flex-end">
+          <Button variant="default" onClick={handleClose}>Cancel</Button>
+          <Button type="submit" loading={loading}>Add Guest</Button>
+        </Group>
+      </form>
+    </Modal>
+  );
+}
+
 const GENDER_OPTIONS = [
   { value: 'male', label: 'Male' },
   { value: 'female', label: 'Female' },
@@ -229,6 +299,7 @@ export default function CustomerSelectWithAdd({
   helperText = null,
   error = null,
   excludeIds = [],
+  simpleAdd = false,
 }) {
   const [modalOpened, setModalOpened] = useState(false);
   const { data: allCustomers = [] } = useQuery({ queryKey: QUERY_KEYS.customers, queryFn: fetchAllCustomers });
@@ -267,11 +338,19 @@ export default function CustomerSelectWithAdd({
         </Button>
       </Group>
       {helperText && <Text size="xs" c="dimmed" mt={4}>{helperText}</Text>}
-      <CustomerAddModal
-        opened={modalOpened}
-        onClose={() => setModalOpened(false)}
-        onAdded={handleAdded}
-      />
+      {simpleAdd ? (
+        <SimpleCustomerAddModal
+          opened={modalOpened}
+          onClose={() => setModalOpened(false)}
+          onAdded={handleAdded}
+        />
+      ) : (
+        <CustomerAddModal
+          opened={modalOpened}
+          onClose={() => setModalOpened(false)}
+          onAdded={handleAdded}
+        />
+      )}
     </div>
   );
 }

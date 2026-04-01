@@ -1,4 +1,4 @@
-import { AppShell, NavLink, Title, Group, Avatar, Text, Burger, Menu, Badge, Box } from '@mantine/core';
+import { AppShell, NavLink, Title, Group, Avatar, Text, Burger, Menu, Badge, Box, ActionIcon, Indicator, Drawer, Stack, Button, Divider } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import {
   IconHome, IconBuildingBank, IconUsers, IconSettings,
@@ -8,7 +8,7 @@ import {
   IconBuildingSkyscraper, IconCalendarEvent, IconHeartHandshake,
   IconTrendingUp, IconClock, IconBedFilled, IconTimeline,
   IconShieldLock, IconUserCog, IconLock, IconPackage,
-  IconBan, IconCash, IconReceipt, IconScale, IconCoinRupee,
+  IconBan, IconCash, IconReceipt, IconScale, IconCoinRupee, IconBell,
 } from '@tabler/icons-react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -45,8 +45,12 @@ import CashReconciliation from './pages/finance/CashReconciliation';
 import ExpenseReport from './pages/finance/ExpenseReport';
 import History from './pages/History';
 import GSTReport from './pages/GSTReport';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
+import { useState, useEffect } from 'react';
 import usePermissions from './hooks/usePermissions';
+import { QUERY_KEYS, fetchDueReminders } from './api/queries';
+import api from './api/client';
+import { notifySuccess, notifyError } from './api/notify';
 
 // Force white text on dark sidebar — inline JSX label bypasses Mantine's CSS var cascade
 const NL = {
@@ -64,6 +68,27 @@ function AppLayout() {
   const path = location.pathname;
   const queryClient = useQueryClient();
   const [navOpened, { toggle: toggleNav, close: closeNav }] = useDisclosure(false);
+  const [reminderDrawerOpen, setReminderDrawerOpen] = useState(false);
+  const { permissions, username, firstName, lastName, email, hasAnyReport, hasAnyAdmin, hasAnyOps, hasAnySettings } = usePermissions();
+
+  const canViewReminders = permissions.view_reservationreminder || permissions.is_superuser;
+
+  const { data: reminders = [] } = useQuery({
+    queryKey: QUERY_KEYS.reminders,
+    queryFn: fetchDueReminders,
+    refetchOnWindowFocus: true,
+    enabled: canViewReminders,
+  });
+
+  useEffect(() => {
+    if (canViewReminders && reminders.length > 0) setReminderDrawerOpen(true);
+  }, [reminders.length, canViewReminders]);
+
+  const dismissMutation = useMutation({
+    mutationFn: (id) => api.patch(`/v1/reminder/${id}/`, { is_dismissed: true }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: QUERY_KEYS.reminders }),
+    onError: () => notifyError('Failed to dismiss reminder.'),
+  });
 
   const handleLogout = () => {
     queryClient.clear();
@@ -77,7 +102,6 @@ function AppLayout() {
   const reportsActive = path.startsWith('/reports');
   const financeActive = path.startsWith('/finance');
   const adminActive = path.startsWith('/admin');
-  const { permissions, username, firstName, lastName, email, hasAnyReport, hasAnyAdmin, hasAnyOps, hasAnySettings } = usePermissions();
   const hasAnyFinance = permissions.view_pl_report || permissions.view_staff_sales_report || permissions.view_cash_reconciliation || permissions.view_expense_report || permissions.is_superuser;
 
   const initials = firstName
@@ -104,6 +128,26 @@ function AppLayout() {
             <Title order={4}>Hotel Manager</Title>
           </Group>
           <Group gap="xs">
+            {canViewReminders && (
+              <Indicator
+                label={reminders.length}
+                size={18}
+                disabled={reminders.length === 0}
+                color="red"
+                inline
+                styles={{ indicator: { fontSize: 10, fontWeight: 700 } }}
+              >
+                <ActionIcon
+                  variant={reminders.length > 0 ? 'light' : 'subtle'}
+                  color={reminders.length > 0 ? 'orange' : 'gray'}
+                  size="lg"
+                  radius="xl"
+                  onClick={() => setReminderDrawerOpen(true)}
+                >
+                  <IconBell size={18} />
+                </ActionIcon>
+              </Indicator>
+            )}
             <Menu shadow="md" width={220} position="bottom-end" withArrow>
               <Menu.Target>
                 <Avatar size="sm" radius="xl" color="teal" style={{ cursor: 'pointer' }}>
@@ -463,6 +507,46 @@ function AppLayout() {
           </NavLink>
         )}
       </AppShell.Navbar>
+
+      <Drawer
+        opened={reminderDrawerOpen}
+        onClose={() => setReminderDrawerOpen(false)}
+        title="Upcoming Reservation Reminders"
+        position="right"
+        size="md"
+      >
+        {reminders.length === 0 ? (
+          <Text c="dimmed" size="sm">No pending reminders.</Text>
+        ) : (
+          <Stack gap="sm">
+            {reminders.map(r => {
+              const checkIn = r.check_in_date || '—';
+              const roomNum = r.room_number || '—';
+              const label = r.days_before === 0 ? 'Today!' : `${r.days_before} day${r.days_before !== 1 ? 's' : ''} before`;
+              return (
+                <Box key={r.id} p="sm" style={{ border: '1px solid var(--mantine-color-orange-3)', borderRadius: 8 }}>
+                  <Group justify="space-between" wrap="nowrap">
+                    <div>
+                      <Text fw={600} size="sm">Room {roomNum}</Text>
+                      <Text size="xs" c="dimmed">Check-in: {checkIn}</Text>
+                      <Badge color={r.days_before === 0 ? 'red' : 'orange'} size="xs" mt={4}>{label}</Badge>
+                    </div>
+                    <Button
+                      size="xs"
+                      variant="light"
+                      color="gray"
+                      loading={dismissMutation.isPending}
+                      onClick={() => dismissMutation.mutate(r.id)}
+                    >
+                      Dismiss
+                    </Button>
+                  </Group>
+                </Box>
+              );
+            })}
+          </Stack>
+        )}
+      </Drawer>
 
       <AppShell.Main bg="gray.0">
         <Routes>

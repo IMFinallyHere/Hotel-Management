@@ -106,6 +106,16 @@ class Reservation(models.Model):
     created_on = models.DateTimeField(auto_now_add=True)
 
 
+class ReservationReminder(models.Model):
+    reservation = models.ForeignKey(Reservation, models.CASCADE, related_name='reminders')
+    days_before = models.PositiveSmallIntegerField()
+    dismissed_by = models.ManyToManyField(User, blank=True, related_name='dismissed_reminders')
+    created_on = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('reservation', 'days_before')
+
+
 class Amenity(models.Model):
     CHARGE_TYPES = [('flat', 'Flat'), ('per_night', 'Per Night')]
     name = models.CharField(max_length=100, unique=True)

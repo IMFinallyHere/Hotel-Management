@@ -17,6 +17,7 @@ export const QUERY_KEYS = {
   users: ['users'],
   groups: ['groups'],
   permissions: ['permissions'],
+  reminders: ['reminders'],
 };
 
 export const fetchRooms = () => api.get('/v1/rooms/').then(r => r.data);
@@ -88,3 +89,4 @@ export const fetchCashReconciliation = (params) => api.get('/v1/finance/cash-rec
 export const fetchExpenseReport = (params) => api.get('/v1/finance/expenses/', { params }).then(r => r.data);
 export const fetchStayHistory = (params) => api.get('/v1/stay-logs/history/', { params }).then(r => r.data);
 export const fetchGSTReport = (params) => api.get('/v1/reports/gst/', { params }).then(r => r.data);
+export const fetchDueReminders = () => api.get('/v1/reminders/').then(r => r.data);

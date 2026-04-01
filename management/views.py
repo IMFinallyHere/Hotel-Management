@@ -9,8 +9,8 @@ from django.db.models import Q, Count
 from django.db.models import ProtectedError
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, Group, CustomerGroup, RoomsPriceChart, Reservation, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense
-from .serializers import RoomSerializer, RoomTypeSerializer, CountryCodeSerializer, CustomerSerializer, ConfigurationSerializer, CheckinSerializer, GroupCustomerSerializer, RoomsPriceChartSerializer, StayLogSerializer, StayLogUpdateSerializer, ReservationSerializer, AmenitySerializer, StayLogAmenitySerializer, ActiveStayLogSerializer, RoomNCRequestSerializer, PaymentSerializer, CashWithdrawalSerializer, ExpenseSerializer, ExtendStaySerializer, GraceSerializer, ShiftRoomSerializer
+from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, Group, CustomerGroup, RoomsPriceChart, Reservation, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense
+from .serializers import RoomSerializer, RoomTypeSerializer, CountryCodeSerializer, CustomerSerializer, ConfigurationSerializer, CheckinSerializer, GroupCustomerSerializer, RoomsPriceChartSerializer, StayLogSerializer, StayLogUpdateSerializer, ReservationSerializer, ReservationReminderSerializer, AmenitySerializer, StayLogAmenitySerializer, ActiveStayLogSerializer, RoomNCRequestSerializer, PaymentSerializer, CashWithdrawalSerializer, ExpenseSerializer, ExtendStaySerializer, GraceSerializer, ShiftRoomSerializer
 from .permissions import report_permission, HasModelPermission
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.permissions import DjangoModelPermissions
@@ -1053,6 +1053,7 @@ class UserPermissionsView(APIView):
             'view_staff_sales_report',
             'view_cash_reconciliation',
             'view_expense_report',
+            'view_reservationreminder',
         ]
         admin_perms = [
             'add_user',
@@ -1664,3 +1665,40 @@ class StayLogHistory(generics.ListAPIView):
         if end:
             qs = qs.filter(check_out__date__lte=end)
         return qs
+
+
+class ReservationReminderListCreate(generics.ListCreateAPIView):
+    serializer_class = ReservationReminderSerializer
+    permission_classes = [report_permission('view_reservationreminder')]
+
+    def get_queryset(self):
+        today = timezone.localdate()
+        qs = ReservationReminder.objects.select_related('reservation__room').exclude(
+            dismissed_by=self.request.user
+        )
+        due_ids = [r.id for r in qs if (r.reservation.check_in_date - timedelta(days=r.days_before)) <= today]
+        return qs.filter(id__in=due_ids)
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+
+
+class ReservationReminderDetail(generics.RetrieveUpdateDestroyAPIView):
+    serializer_class = ReservationReminderSerializer
+    permission_classes = [report_permission('view_reservationreminder')]
+
+    def get_queryset(self):
+        return ReservationReminder.objects.all()
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if request.data.get('is_dismissed'):
+            instance.dismissed_by.add(request.user)
+        return Response(self.get_serializer(instance).data)

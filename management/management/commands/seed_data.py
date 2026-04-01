@@ -7,12 +7,12 @@ from django.utils import timezone
 from management.models import (
     Amenity, CashWithdrawal, Configurations, CountryCodes,
     CustomerGroup, Customers, Expense, Group, Payment,
-    Reservation, RoomNCRequest, Rooms, RoomsPriceChart,
+    Reservation, ReservationReminder, RoomNCRequest, Rooms, RoomsPriceChart,
     RoomStayLogs, RoomType, StayLogAmenity,
 )
 
-TODAY = date(2026, 3, 20)
-NOW = timezone.make_aware(timezone.datetime(2026, 3, 20, 12, 0, 0))
+TODAY = timezone.localdate()
+NOW = timezone.now().replace(hour=12, minute=0, second=0, microsecond=0)
 
 
 class Command(BaseCommand):
@@ -485,6 +485,31 @@ class Command(BaseCommand):
                     "requested_by": receptionist,
                     "reviewed_by": None,
                 },
+            )
+            if created:
+                created_count += 1
+
+        # ── 19. ReservationReminders ──────────────────────────────────────────
+        # Fetch upcoming reservations (future check-in)
+        res_103 = Reservation.objects.filter(room=rooms["103"], check_in_date__gte=TODAY).order_by('check_in_date').first()
+        res_204 = Reservation.objects.filter(room=rooms["204"], check_in_date__gte=TODAY).order_by('check_in_date').first()
+        res_302 = Reservation.objects.filter(room=rooms["302"], check_in_date__gte=TODAY).order_by('check_in_date').first()
+        res_402 = Reservation.objects.filter(room=rooms["402"], check_in_date__gte=TODAY).order_by('check_in_date').first()
+
+        reminders_data = []
+        if res_103:
+            reminders_data += [(res_103, 3), (res_103, 0)]   # 3 days before + same day
+        if res_204:
+            reminders_data += [(res_204, 5), (res_204, 1)]   # 5 days before + 1 day before
+        if res_302:
+            reminders_data += [(res_302, 7), (res_302, 3)]   # 7 days before + 3 days before
+        if res_402:
+            reminders_data += [(res_402, 14), (res_402, 7)]  # 14 days before + 7 days before
+
+        for reservation, days_before in reminders_data:
+            _, created = ReservationReminder.objects.get_or_create(
+                reservation=reservation,
+                days_before=days_before,
             )
             if created:
                 created_count += 1
