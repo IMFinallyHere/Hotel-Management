@@ -3,7 +3,7 @@ from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, RoomsPriceChart, Reservation, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense
+from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, RoomsPriceChart, Reservation, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, RoomStatusLog
 
 
 class RoomTypeSerializer(serializers.ModelSerializer):
@@ -15,7 +15,20 @@ class RoomTypeSerializer(serializers.ModelSerializer):
 class RoomSerializer(serializers.ModelSerializer):
     class Meta:
         model = Rooms
-        fields = ['id', 'room_number', 'room_type', 'beds', 'price', 'is_ac']
+        fields = ['id', 'room_number', 'room_type', 'beds', 'price', 'is_ac', 'status']
+
+
+class RoomStatusLogSerializer(serializers.ModelSerializer):
+    changed_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RoomStatusLog
+        fields = ['id', 'old_status', 'new_status', 'changed_by_name', 'changed_on', 'note']
+
+    def get_changed_by_name(self, obj):
+        if not obj.changed_by:
+            return 'System'
+        return obj.changed_by.get_full_name() or obj.changed_by.username
 
 
 class CountryCodeSerializer(serializers.ModelSerializer):
@@ -46,11 +59,12 @@ class RoomsPriceChartSerializer(serializers.ModelSerializer):
 class CheckinSerializer(serializers.ModelSerializer):
     class Meta:
         model = RoomStayLogs
-        fields = ['room', 'price', 'group', 'extra_bed', 'extra_per_bed_price', 'expected_checkout', 'gst_applied', 'is_ac']
+        fields = ['room', 'price', 'group', 'extra_bed', 'extra_per_bed_price', 'expected_checkout', 'gst_applied', 'gst_inclusive', 'is_ac']
         extra_kwargs = {
             'price': {'required': False, 'default': 0},
             'expected_checkout': {'required': False},
             'gst_applied': {'required': False, 'default': False},
+            'gst_inclusive': {'required': False, 'default': False},
             'is_ac': {'required': False, 'default': None},
         }
 
@@ -59,6 +73,8 @@ class CheckinSerializer(serializers.ModelSerializer):
         room = get_object_or_404(Rooms, pk=value.pk)
         if room.is_occupied():
             raise ValidationError('Room is already occupied. Please checkout room to occupy it again.')
+        if room.status != 'available':
+            raise ValidationError(f'Room cannot be checked in (status: {room.get_status_display()}).')
         return room
 
     def validate(self, attrs):
@@ -87,7 +103,7 @@ class StayLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = RoomStayLogs
         fields = ['id', 'room', 'group', 'check_in', 'check_out', 'price', 'extra_bed', 'extra_per_bed_price', 'is_nc',
-                  'expected_checkout', 'overtime_rate', 'grace_until', 'is_early_checkin', 'gst_applied',
+                  'expected_checkout', 'overtime_rate', 'grace_until', 'is_early_checkin', 'gst_applied', 'gst_inclusive',
                   'shifted_from', 'shift_reason', 'is_ac']
 
 

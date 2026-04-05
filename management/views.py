@@ -9,8 +9,8 @@ from django.db.models import Q, Count
 from django.db.models import ProtectedError
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, Group, CustomerGroup, RoomsPriceChart, Reservation, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense
-from .serializers import RoomSerializer, RoomTypeSerializer, CountryCodeSerializer, CustomerSerializer, ConfigurationSerializer, CheckinSerializer, GroupCustomerSerializer, RoomsPriceChartSerializer, StayLogSerializer, StayLogUpdateSerializer, ReservationSerializer, ReservationReminderSerializer, AmenitySerializer, StayLogAmenitySerializer, ActiveStayLogSerializer, RoomNCRequestSerializer, PaymentSerializer, CashWithdrawalSerializer, ExpenseSerializer, ExtendStaySerializer, GraceSerializer, ShiftRoomSerializer
+from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, Group, CustomerGroup, RoomsPriceChart, Reservation, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, RoomStatusLog
+from .serializers import RoomSerializer, RoomTypeSerializer, CountryCodeSerializer, CustomerSerializer, ConfigurationSerializer, CheckinSerializer, GroupCustomerSerializer, RoomsPriceChartSerializer, StayLogSerializer, StayLogUpdateSerializer, ReservationSerializer, ReservationReminderSerializer, AmenitySerializer, StayLogAmenitySerializer, ActiveStayLogSerializer, RoomNCRequestSerializer, PaymentSerializer, CashWithdrawalSerializer, ExpenseSerializer, ExtendStaySerializer, GraceSerializer, ShiftRoomSerializer, RoomStatusLogSerializer
 from .permissions import report_permission, HasModelPermission
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.permissions import DjangoModelPermissions
@@ -47,6 +47,18 @@ class RoomDetail(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = RoomSerializer
     permission_classes = [DjangoModelPermissions]
 
+    def perform_update(self, serializer):
+        old_status = self.get_object().status
+        instance = serializer.save()
+        new_status = instance.status
+        if old_status != new_status:
+            RoomStatusLog.objects.create(
+                room=instance,
+                old_status=old_status,
+                new_status=new_status,
+                changed_by=self.request.user,
+            )
+
     def destroy(self, request, *args, **kwargs):
         room = self.get_object()
         if room.logs.exists() or room.reservations.exists() or room.price_chart.exists():
@@ -55,6 +67,14 @@ class RoomDetail(generics.RetrieveUpdateDestroyAPIView):
                 status=400,
             )
         return super().destroy(request, *args, **kwargs)
+
+
+class RoomStatusLogList(generics.ListAPIView):
+    serializer_class = RoomStatusLogSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return RoomStatusLog.objects.filter(room_id=self.kwargs['pk'])
 
 
 class CountryCodeListCreate(generics.ListCreateAPIView):
@@ -76,9 +96,16 @@ class CountryCodeDetail(generics.RetrieveUpdateDestroyAPIView):
 
 
 class CustomerListCreate(generics.ListCreateAPIView):
-    queryset = Customers.objects.all()
+    queryset = Customers.objects.none()
     serializer_class = CustomerSerializer
     permission_classes = [DjangoModelPermissions]
+
+    def get_queryset(self):
+        qs = Customers.objects.all()
+        search = self.request.query_params.get('search', '').strip()
+        if search:
+            qs = qs.filter(Q(number__contains=search) | Q(name__icontains=search))
+        return qs
 
 
 class CustomerDetail(generics.RetrieveUpdateDestroyAPIView):
@@ -129,8 +156,8 @@ class Checkin(APIView):
     def post(self, request):
         serializer = CheckinSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        serializer.save()
-        return Response({'success_message': 'Checking Successful.'})
+        log = serializer.save()
+        return Response({'success_message': 'Checking Successful.', 'log_id': log.id})
 
 
 class Checkout(APIView):
@@ -146,6 +173,17 @@ class Checkout(APIView):
             return Response({'error': 'Room already checked out.'}, status=400)
         log.check_out = timezone.now()
         log.save()
+        room = log.room
+        old_status = room.status
+        room.status = 'cleaning'
+        room.save(update_fields=['status'])
+        RoomStatusLog.objects.create(
+            room=room,
+            old_status=old_status,
+            new_status='cleaning',
+            changed_by=request.user,
+            note='Auto-set after checkout',
+        )
         return Response({'success_message': 'Checkout Successful.'})
 
 

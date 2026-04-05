@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { SimpleGrid, Card, Badge, Text, Group, TextInput, SegmentedControl, Loader, Center, Stack, Button, Modal, Select, NumberInput, Switch } from '@mantine/core';
+import { SimpleGrid, Card, Badge, Text, Group, TextInput, SegmentedControl, Loader, Center, Stack, Button, Modal, Select, NumberInput, Switch, ActionIcon, Popover, Divider } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { useDisclosure } from '@mantine/hooks';
-import { IconSearch, IconPlus } from '@tabler/icons-react';
+import { IconSearch, IconPlus, IconTool } from '@tabler/icons-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
@@ -12,18 +12,22 @@ import { parseApiError } from '../api/errorUtils';
 import usePermissions from '../hooks/usePermissions';
 import { parseConfigs, isLogOvertime } from '../utils/configUtils';
 
-function getRoomStatus(roomId, occupiedIds, reservedIds, overtimeIds) {
-  if (overtimeIds.has(roomId)) return 'overtime';
-  if (occupiedIds.has(roomId)) return 'occupied';
-  if (reservedIds.has(roomId)) return 'reserved';
+function getRoomStatus(room, occupiedIds, reservedIds, overtimeIds) {
+  if (overtimeIds.has(room.id)) return 'overtime';
+  if (occupiedIds.has(room.id)) return 'occupied';
+  if (room.status === 'cleaning') return 'cleaning';
+  if (room.status === 'out_of_order') return 'out_of_order';
+  if (reservedIds.has(room.id)) return 'reserved';
   return 'available';
 }
 
 const STATUS_CONFIG = {
-  overtime:  { color: 'yellow', label: 'Overtime' },
-  occupied:  { color: 'red',    label: 'Occupied' },
-  reserved:  { color: 'orange', label: 'Reserved' },
-  available: { color: 'teal',   label: 'Available' },
+  overtime:     { color: 'yellow', label: 'Overtime' },
+  occupied:     { color: 'red',    label: 'Occupied' },
+  cleaning:     { color: 'violet', label: 'Cleaning' },
+  out_of_order: { color: 'dark',   label: 'Out of Order' },
+  reserved:     { color: 'orange', label: 'Reserved' },
+  available:    { color: 'teal',   label: 'Available' },
 };
 
 export default function RoomDashboard() {
@@ -86,9 +90,19 @@ export default function RoomDashboard() {
       .map(r => r.room)
   );
 
+  const statusChangeMutation = useMutation({
+    mutationFn: ({ id, status }) => api.patch(`/v1/room/${id}/`, { status }),
+    onSuccess: (_, { id }) => {
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.rooms });
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.roomStatusLogs(id) });
+      notifySuccess('Room status updated.');
+    },
+    onError: (e) => notifyError(parseApiError(e, 'Failed to update room status.')),
+  });
+
   const filteredRooms = rooms.filter(room => {
     if (search && !room.room_number.toLowerCase().includes(search.toLowerCase())) return false;
-    if (statusFilter !== 'all' && getRoomStatus(room.id, occupiedIds, reservedIds, overtimeIds) !== statusFilter) return false;
+    if (statusFilter !== 'all' && getRoomStatus(room, occupiedIds, reservedIds, overtimeIds) !== statusFilter) return false;
     return true;
   });
 
@@ -105,10 +119,12 @@ export default function RoomDashboard() {
             {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (
               <Badge key={key} color={cfg.color} variant="light" size="lg">
                 {cfg.label}: {
-                  key === 'overtime' ? overtimeIds.size
-                  : key === 'occupied' ? [...occupiedIds].filter(id => !overtimeIds.has(id)).length
-                  : key === 'reserved' ? [...reservedIds].filter(id => !occupiedIds.has(id)).length
-                  : rooms.filter(r => !occupiedIds.has(r.id) && !reservedIds.has(r.id)).length
+                  key === 'overtime'     ? overtimeIds.size
+                  : key === 'occupied'  ? [...occupiedIds].filter(id => !overtimeIds.has(id)).length
+                  : key === 'cleaning'  ? rooms.filter(r => !occupiedIds.has(r.id) && r.status === 'cleaning').length
+                  : key === 'out_of_order' ? rooms.filter(r => !occupiedIds.has(r.id) && r.status === 'out_of_order').length
+                  : key === 'reserved' ? [...reservedIds].filter(id => !occupiedIds.has(id) && rooms.find(r => r.id === id)?.status === 'available').length
+                  : rooms.filter(r => !occupiedIds.has(r.id) && !reservedIds.has(r.id) && r.status === 'available').length
                 }
               </Badge>
             ))}
@@ -135,6 +151,8 @@ export default function RoomDashboard() {
           data={[
             { value: 'all', label: 'All' },
             { value: 'available', label: 'Available' },
+            { value: 'cleaning', label: 'Cleaning' },
+            { value: 'out_of_order', label: 'Out of Order' },
             { value: 'reserved', label: 'Reserved' },
             { value: 'occupied', label: 'Occupied' },
             { value: 'overtime', label: 'Overtime' },
@@ -144,10 +162,11 @@ export default function RoomDashboard() {
 
       <SimpleGrid cols={{ base: 2, sm: 3, md: 4, lg: 5 }}>
         {filteredRooms.map(room => {
-          const status = getRoomStatus(room.id, occupiedIds, reservedIds, overtimeIds);
+          const status = getRoomStatus(room, occupiedIds, reservedIds, overtimeIds);
           const cfg = STATUS_CONFIG[status];
           const todayPrice = todayPriceMap[room.id];
           const occupiedPrice = occupiedPriceMap[room.id];
+          const isOccupied = occupiedIds.has(room.id);
           return (
             <Card
               key={room.id}
@@ -157,7 +176,62 @@ export default function RoomDashboard() {
             >
               <Group justify="space-between" mb="xs">
                 <Text fw={700} size="lg">{room.room_number}</Text>
-                <Badge color={cfg.color} size="sm">{cfg.label}</Badge>
+                <Group gap={4}>
+                  <Badge color={cfg.color} size="sm">{cfg.label}</Badge>
+                  {!isOccupied && (permissions.change_rooms || permissions.is_superuser) && (
+                    <div onClick={(e) => e.stopPropagation()}>
+                    <Popover position="bottom-end" withinPortal>
+                      <Popover.Target>
+                        <ActionIcon
+                          size="xs"
+                          variant="subtle"
+                          color="gray"
+                          title="Change room status"
+                        >
+                          <IconTool size={12} />
+                        </ActionIcon>
+                      </Popover.Target>
+                      <Popover.Dropdown p="xs">
+                        <Stack gap={4}>
+                          {room.status !== 'available' && (
+                            <Button
+                              size="xs"
+                              variant="light"
+                              color="teal"
+                              loading={statusChangeMutation.isPending}
+                              onClick={() => statusChangeMutation.mutate({ id: room.id, status: 'available' })}
+                            >
+                              Mark Available
+                            </Button>
+                          )}
+                          {room.status !== 'out_of_order' && (
+                            <Button
+                              size="xs"
+                              variant="light"
+                              color="dark"
+                              loading={statusChangeMutation.isPending}
+                              onClick={() => statusChangeMutation.mutate({ id: room.id, status: 'out_of_order' })}
+                            >
+                              Out of Order
+                            </Button>
+                          )}
+                          {room.status !== 'cleaning' && (
+                            <Button
+                              size="xs"
+                              variant="light"
+                              color="violet"
+                              loading={statusChangeMutation.isPending}
+                              onClick={() => statusChangeMutation.mutate({ id: room.id, status: 'cleaning' })}
+                            >
+                              Mark Cleaning
+                            </Button>
+                          )}
+                        </Stack>
+                      </Popover.Dropdown>
+                    </Popover>
+                    </div>
+                  )}
+                </Group>
               </Group>
               <Group gap={6} mb={4}>
                 <Text c="dimmed" size="sm">{roomTypeMap[room.room_type] ?? '—'}</Text>

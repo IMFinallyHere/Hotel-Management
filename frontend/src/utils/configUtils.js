@@ -21,9 +21,13 @@ export function computeOvertimeFee(log) {
 }
 
 // Compute GST on room charges only (nightly rate × nights + extra bed × nights)
+// When gst_inclusive, GST is extracted from the price (already included), not added on top.
 export function computeGst(log, nights, gstPercent) {
   if (!log?.gst_applied || log.is_nc) return 0;
   const rate = Number(gstPercent ?? 0) / 100;
   const roomBase = (Number(log.price) + log.extra_bed * Number(log.extra_per_bed_price)) * nights;
+  if (log.gst_inclusive) {
+    return Math.round(roomBase * rate / (1 + rate));
+  }
   return Math.round(roomBase * rate);
 }

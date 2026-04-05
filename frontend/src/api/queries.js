@@ -3,6 +3,7 @@ import api from './client';
 export const QUERY_KEYS = {
   rooms: ['rooms'],
   room: (id) => ['room', String(id)],
+  roomStatusLogs: (id) => ['room-status-logs', String(id)],
   roomTypes: ['room-types'],
   activeLogs: ['stay-logs'],
   reservations: ['reservations'],
@@ -22,11 +23,13 @@ export const QUERY_KEYS = {
 
 export const fetchRooms = () => api.get('/v1/rooms/').then(r => r.data);
 export const fetchRoom = (id) => api.get(`/v1/room/${id}/`).then(r => r.data);
+export const fetchRoomStatusLogs = (id) => api.get(`/v1/room/${id}/status-logs/`).then(r => r.data);
 export const fetchRoomTypes = () => api.get('/v1/room/types/').then(r => r.data);
 export const fetchActiveLogs = () => api.get('/v1/stay-logs/').then(r => r.data);
 export const fetchReservations = () => api.get('/v1/reservations/').then(r => r.data);
 export const fetchRoomReservations = (id) => api.get(`/v1/reservations/?room=${id}`).then(r => r.data);
 export const fetchAllCustomers = () => api.get('/v1/customers/').then(r => r.data);
+export const searchCustomers = (search) => api.get('/v1/customers/', { params: { search } }).then(r => r.data);
 export const fetchCountryCodes = () => api.get('/v1/country/codes/').then(r => r.data);
 export const fetchGroupCustomers = (groupId) => api.get(`/v1/group/${groupId}/customers/`).then(r => r.data);
 export const fetchPriceChart = () => api.get('/v1/price/chart/').then(r => r.data);

@@ -1,1 +1,16 @@
 /.env
+
+# Python
+__pycache__/
+*.pyc
+db.sqlite3
+
+# Media uploads
+media/
+
+# Environment
+frontend/.env
+
+# IDE / tooling
+.idea/
+.claude/

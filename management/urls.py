@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import (RoomTypeListCreate, RoomTypeDetail, RoomListCreate, RoomDetail,
+from .views import (RoomTypeListCreate, RoomTypeDetail, RoomListCreate, RoomDetail, RoomStatusLogList,
                     CountryCodeListCreate, CountryCodeDetail, CustomerListCreate, CustomerDetail,
                     ConfigurationListCreate, ConfigurationDetail, Checkin, Checkout,
                     RoomsPriceChartListCreate, RoomsPriceChartDetail, StayLogListActive, StayLogDetail,
@@ -25,6 +25,7 @@ urlpatterns = [
     path('room/types/<int:pk>/', RoomTypeDetail.as_view(), name='room-type-detail'),
     path('rooms/', RoomListCreate.as_view(), name='room-list-create'),
     path('room/<int:pk>/', RoomDetail.as_view(), name='room-detail'),
+    path('room/<int:pk>/status-logs/', RoomStatusLogList.as_view(), name='room-status-logs'),
     path('country/codes/', CountryCodeListCreate.as_view(), name='country-code-list-create'),
     path('country/codes/<int:pk>/', CountryCodeDetail.as_view(), name='country-code-detail'),
     path('customers/', CustomerListCreate.as_view(), name='customer-list-create'),

@@ -54,14 +54,28 @@ class RoomType(models.Model):
 
 
 class Rooms(models.Model):
+    ROOM_STATUS = [('available', 'Available'), ('cleaning', 'Cleaning'), ('out_of_order', 'Out of Order')]
     room_number = models.CharField(unique=True, max_length=10)
     room_type = models.ForeignKey(RoomType, models.PROTECT, 'rooms')
     beds = models.PositiveSmallIntegerField()
     price = models.DecimalField(max_digits=7, decimal_places=0)  # default price
     is_ac = models.BooleanField(default=False)
+    status = models.CharField(choices=ROOM_STATUS, max_length=15, default='available')
 
     def is_occupied(self) -> bool:
         return self.logs.filter(check_out=None).exists()
+
+
+class RoomStatusLog(models.Model):
+    room = models.ForeignKey(Rooms, models.CASCADE, related_name='status_logs')
+    old_status = models.CharField(max_length=15)
+    new_status = models.CharField(max_length=15)
+    changed_by = models.ForeignKey(User, models.SET_NULL, null=True, blank=True)
+    changed_on = models.DateTimeField(auto_now_add=True)
+    note = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        ordering = ['-changed_on']
 
 
 class RoomsPriceChart(models.Model):
@@ -87,6 +101,7 @@ class RoomStayLogs(models.Model):
     grace_until = models.DateTimeField(null=True, blank=True)
     is_early_checkin = models.BooleanField(default=False)
     gst_applied = models.BooleanField(default=False)
+    gst_inclusive = models.BooleanField(default=False)
     shifted_from = models.ForeignKey('Rooms', models.SET_NULL, null=True, blank=True, related_name='shift_destinations')
     shift_reason = models.TextField(null=True, blank=True)
     is_ac = models.BooleanField(null=True, blank=True)
