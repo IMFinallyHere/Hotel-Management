@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { SimpleGrid, Card, Badge, Text, Group, TextInput, SegmentedControl, Loader, Center, Stack, Button, Modal, Select, NumberInput, Switch, ActionIcon, Popover, Divider } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { useDisclosure } from '@mantine/hooks';
-import { IconSearch, IconPlus, IconTool } from '@tabler/icons-react';
+import { IconSearch, IconPlus, IconTool, IconCalendarPlus } from '@tabler/icons-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
@@ -143,6 +143,11 @@ export default function RoomDashboard() {
         {(permissions.add_rooms || permissions.is_superuser) && (
           <Button leftSection={<IconPlus size={16} />} onClick={() => { addForm.reset(); openAdd(); }}>
             Add Room
+          </Button>
+        )}
+        {(permissions.add_roomstaylogs || permissions.is_superuser) && (
+          <Button leftSection={<IconCalendarPlus size={16} />} color="teal" onClick={() => navigate('/bulk-booking')}>
+            Bulk Booking
           </Button>
         )}
         <SegmentedControl

@@ -141,15 +141,23 @@ class ReservationReminderSerializer(serializers.ModelSerializer):
 
 class ReservationSerializer(serializers.ModelSerializer):
     reminders = serializers.SerializerMethodField()
+    room_number = serializers.CharField(source='room.room_number', read_only=True)
+    customers = serializers.SerializerMethodField()
 
     def get_reminders(self, obj):
         request = self.context.get('request')
         qs = obj.reminders.all()
         return ReservationReminderSerializer(qs, many=True, context={'request': request}).data
 
+    def get_customers(self, obj):
+        return [
+            {'id': cg.customer.id, 'name': cg.customer.name, 'number': cg.customer.number}
+            for cg in obj.group.customers.select_related('customer').all()
+        ]
+
     class Meta:
         model = Reservation
-        fields = ['id', 'room', 'group', 'check_in_date', 'check_out_date', 'price', 'created_on', 'reminders']
+        fields = ['id', 'room', 'room_number', 'group', 'customers', 'check_in_date', 'check_out_date', 'price', 'advance_amount', 'advance_payment_type', 'created_on', 'reminders']
 
     def validate(self, attrs):
         check_in = attrs.get('check_in_date')

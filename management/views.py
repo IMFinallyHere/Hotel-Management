@@ -254,11 +254,27 @@ class ReservationListCreate(generics.ListCreateAPIView):
     permission_classes = [DjangoModelPermissions]
 
     def get_queryset(self):
-        qs = Reservation.objects.all()
-        room = self.request.query_params.get('room')
-        if room:
-            qs = qs.filter(room=room)
-        return qs
+        qs = Reservation.objects.select_related('room', 'group').prefetch_related('group__customers__customer')
+        p = self.request.query_params
+        if p.get('room'):
+            qs = qs.filter(room=p['room'])
+        if p.get('room_number'):
+            qs = qs.filter(room__room_number__icontains=p['room_number'])
+        if p.get('customer'):
+            q = p['customer']
+            qs = qs.filter(
+                Q(group__customers__customer__name__icontains=q) |
+                Q(group__customers__customer__number__contains=q)
+            ).distinct()
+        if p.get('check_in_from'):
+            qs = qs.filter(check_in_date__gte=p['check_in_from'])
+        if p.get('check_in_to'):
+            qs = qs.filter(check_in_date__lte=p['check_in_to'])
+        if p.get('check_out_from'):
+            qs = qs.filter(check_out_date__gte=p['check_out_from'])
+        if p.get('check_out_to'):
+            qs = qs.filter(check_out_date__lte=p['check_out_to'])
+        return qs.order_by('-check_in_date')
 
 
 class ReservationDetail(generics.RetrieveUpdateDestroyAPIView):

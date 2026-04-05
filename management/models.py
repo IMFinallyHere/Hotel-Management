@@ -113,11 +113,14 @@ class Configurations(models.Model):
 
 
 class Reservation(models.Model):
+    PAYMENT_TYPES = [('cash', 'Cash'), ('upi', 'UPI'), ('card', 'Card'), ('other', 'Other')]
     room = models.ForeignKey(Rooms, models.CASCADE, 'reservations')
     group = models.ForeignKey(Group, models.PROTECT, 'reservations')
     check_in_date = models.DateField()
     check_out_date = models.DateField()
     price = models.DecimalField(max_digits=7, decimal_places=0, default=0)
+    advance_amount = models.DecimalField(max_digits=7, decimal_places=0, default=0)
+    advance_payment_type = models.CharField(max_length=10, choices=PAYMENT_TYPES, default='cash', blank=True)
     created_on = models.DateTimeField(auto_now_add=True)
 
 

@@ -8,7 +8,7 @@ import {
   IconBuildingSkyscraper, IconCalendarEvent, IconHeartHandshake,
   IconTrendingUp, IconClock, IconBedFilled, IconTimeline,
   IconShieldLock, IconUserCog, IconLock, IconPackage,
-  IconBan, IconCash, IconReceipt, IconScale, IconCoinRupee, IconBell,
+  IconBan, IconCash, IconReceipt, IconScale, IconCoinRupee, IconBell, IconCalendarStats,
 } from '@tabler/icons-react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -45,6 +45,8 @@ import CashReconciliation from './pages/finance/CashReconciliation';
 import ExpenseReport from './pages/finance/ExpenseReport';
 import History from './pages/History';
 import GSTReport from './pages/GSTReport';
+import BulkBooking from './pages/BulkBookingModal';
+import Reservations from './pages/Reservations';
 import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
 import { useState, useEffect } from 'react';
 import usePermissions from './hooks/usePermissions';
@@ -97,7 +99,7 @@ function AppLayout() {
   };
 
   const roomsActive = path === '/rooms' || path.startsWith('/rooms/');
-  const operationsActive = roomsActive || path === '/checkout' || path === '/customers' || path === '/nc-requests' || path === '/cash-drawer' || path === '/expenses' || path === '/history';
+  const operationsActive = roomsActive || path === '/checkout' || path === '/customers' || path === '/nc-requests' || path === '/cash-drawer' || path === '/expenses' || path === '/history' || path === '/bulk-booking' || path === '/reservations';
   const configActive = ['/configurations', '/amenities', '/room-types', '/price-chart', '/country-codes'].includes(path);
   const reportsActive = path.startsWith('/reports');
   const financeActive = path.startsWith('/finance');
@@ -192,6 +194,15 @@ function AppLayout() {
             leftSection={<IconBuildingBank size={14} color="rgba(255,255,255,0.6)" />}
             onClick={() => { navigate('/rooms'); closeNav(); }}
             active={roomsActive}
+          />
+          )}
+          {(permissions.view_reservation || permissions.is_superuser) && (
+          <NavLink
+            {...NL}
+            label={nl('Reservations')}
+            leftSection={<IconCalendarStats size={14} color="rgba(255,255,255,0.6)" />}
+            onClick={() => { navigate('/reservations'); closeNav(); }}
+            active={path === '/reservations'}
           />
           )}
           {(permissions.view_roomstaylogs || permissions.is_superuser) && (
@@ -554,6 +565,8 @@ function AppLayout() {
           <Route path="/room-types" element={<RoomTypes />} />
           <Route path="/rooms" element={<RoomDashboard />} />
           <Route path="/rooms/:id" element={<RoomDetail />} />
+          <Route path="/bulk-booking" element={<BulkBooking />} />
+          <Route path="/reservations" element={<Reservations />} />
           <Route path="/price-chart" element={<PriceChart />} />
           <Route path="/customers" element={<Customers />} />
           <Route path="/country-codes" element={<CountryCodes />} />
