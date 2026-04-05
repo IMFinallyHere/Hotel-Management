@@ -1122,6 +1122,7 @@ class UserPermissionsView(APIView):
         ops_settings_perms = [
             'view_rooms', 'view_roomstaylogs', 'view_customers',
             'view_expense', 'view_roomncrequest', 'view_cashwithdrawal',
+            'view_reservation',
             'view_roomtype', 'view_roomspricechart', 'view_countrycodes',
             'view_amenity', 'view_configurations',
         ]
@@ -1136,6 +1137,8 @@ class UserPermissionsView(APIView):
             'add_expense', 'change_expense', 'delete_expense',
             'add_roomncrequest', 'change_roomncrequest', 'delete_roomncrequest',
             'add_cashwithdrawal', 'change_cashwithdrawal', 'delete_cashwithdrawal',
+            'add_roomstaylogs', 'change_roomstaylogs', 'delete_roomstaylogs',
+            'add_reservation', 'change_reservation', 'delete_reservation',
             'add_roomtype', 'change_roomtype', 'delete_roomtype',
             'add_roomspricechart', 'change_roomspricechart', 'delete_roomspricechart',
             'add_countrycodes', 'change_countrycodes', 'delete_countrycodes',
