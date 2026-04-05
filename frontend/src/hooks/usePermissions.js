@@ -28,6 +28,7 @@ const ADMIN_KEYS = [
 const OPS_KEYS = [
   'view_rooms', 'view_roomstaylogs', 'view_customers',
   'view_expense', 'view_roomncrequest', 'view_cashwithdrawal',
+  'view_reservation',
 ];
 
 const SETTINGS_KEYS = [
