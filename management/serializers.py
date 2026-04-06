@@ -100,11 +100,19 @@ class CheckinSerializer(serializers.ModelSerializer):
 
 
 class StayLogSerializer(serializers.ModelSerializer):
+    checked_in_by_name = serializers.SerializerMethodField()
+
+    def get_checked_in_by_name(self, obj):
+        u = obj.checked_in_by
+        if not u:
+            return None
+        return u.get_full_name() or u.username
+
     class Meta:
         model = RoomStayLogs
         fields = ['id', 'room', 'group', 'check_in', 'check_out', 'price', 'extra_bed', 'extra_per_bed_price', 'is_nc',
                   'expected_checkout', 'overtime_rate', 'grace_until', 'is_early_checkin', 'gst_applied', 'gst_inclusive',
-                  'shifted_from', 'shift_reason', 'is_ac']
+                  'shifted_from', 'shift_reason', 'is_ac', 'checked_in_by_name']
 
 
 class StayLogUpdateSerializer(serializers.ModelSerializer):
@@ -209,7 +217,19 @@ class ActiveStayLogSerializer(StayLogSerializer):
         fields = StayLogSerializer.Meta.fields + ['is_nc', 'customers', 'amenities', 'payments', 'nc_status']
 
     def get_customers(self, obj):
-        return [{'id': cg.customer.id, 'name': cg.customer.name} for cg in obj.group.customers.all()]
+        return [
+            {
+                'id': cg.customer.id,
+                'name': cg.customer.name,
+                'number': cg.customer.number,
+                'gender': cg.customer.gender,
+                'date_of_birth': str(cg.customer.date_of_birth) if cg.customer.date_of_birth else None,
+                'age': cg.customer.age,
+                'address': cg.customer.address,
+                'pincode': cg.customer.pincode,
+            }
+            for cg in obj.group.customers.select_related('customer').all()
+        ]
 
     def get_amenities(self, obj):
         return [

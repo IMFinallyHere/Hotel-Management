@@ -4,7 +4,7 @@ import { useDisclosure } from '@mantine/hooks';
 import { modals } from '@mantine/modals';
 import { IconSearch, IconPackage, IconTrash, IconCash, IconBan, IconFileText } from '@tabler/icons-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { PDFDownloadLink } from '@react-pdf/renderer';
+import { pdf } from '@react-pdf/renderer';
 import dayjs from 'dayjs';
 import api from '../api/client';
 import { QUERY_KEYS, QUERY_KEYS_OPS, fetchActiveLogs, fetchRooms, fetchAmenities, fetchGroupCustomers, fetchConfigurations, fetchRoomTypes } from '../api/queries';
@@ -354,16 +354,17 @@ export default function Checkout() {
               Shift Room
             </Button>
             {log.gst_applied && log.check_out && (
-              <PDFDownloadLink
-                document={<InvoiceDocument log={log} roomNumber={roomNumber} roomTypeName={roomTypeName} configMap={configMap} nights={nights} />}
-                fileName={`invoice-${log.id}.pdf`}
+              <Button
+                size="xs" variant="light" color="green" leftSection={<IconFileText size={14} />}
+                onClick={async () => {
+                  const blob = await pdf(
+                    <InvoiceDocument log={log} roomNumber={roomNumber} roomTypeName={roomTypeName} configMap={configMap} nights={nights} />
+                  ).toBlob();
+                  window.open(URL.createObjectURL(blob), '_blank');
+                }}
               >
-                {({ loading }) => (
-                  <Button size="xs" variant="light" color="green" leftSection={<IconFileText size={14} />} loading={loading}>
-                    Invoice
-                  </Button>
-                )}
-              </PDFDownloadLink>
+                Invoice
+              </Button>
             )}
             <Button size="xs" color="red" variant="light" onClick={() => handleCheckout(log)}>
               Checkout

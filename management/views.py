@@ -139,7 +139,7 @@ class RoomsPriceChartDetail(generics.RetrieveUpdateDestroyAPIView):
 
 
 class StayLogListActive(generics.ListAPIView):
-    queryset = RoomStayLogs.objects.filter(check_out=None).prefetch_related(
+    queryset = RoomStayLogs.objects.filter(check_out=None).select_related('checked_in_by').prefetch_related(
         'group__customers__customer', 'amenities__amenity', 'payments__processed_by', 'nc_requests',
     )
     serializer_class = ActiveStayLogSerializer
@@ -156,7 +156,7 @@ class Checkin(APIView):
     def post(self, request):
         serializer = CheckinSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        log = serializer.save()
+        log = serializer.save(checked_in_by=request.user)
         return Response({'success_message': 'Checking Successful.', 'log_id': log.id})
 
 
@@ -1703,7 +1703,7 @@ class StayLogHistory(generics.ListAPIView):
 
     def get_queryset(self):
         qs = RoomStayLogs.objects.filter(check_out__isnull=False) \
-            .select_related('room', 'group') \
+            .select_related('room', 'group', 'checked_in_by') \
             .prefetch_related('group__customers__customer', 'amenities__amenity',
                               'payments__processed_by', 'nc_requests') \
             .order_by('-check_out')

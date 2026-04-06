@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Table, Button, Badge, Group, TextInput, Text, Stack, Skeleton } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
-import { PDFDownloadLink } from '@react-pdf/renderer';
+import { pdf } from '@react-pdf/renderer';
 import { IconSearch, IconFileText } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
 import dayjs from 'dayjs';
@@ -78,24 +78,17 @@ export default function History() {
         <Table.Td fw={600}>{log.is_nc ? <Badge color="grape" variant="light">₹0 (NC)</Badge> : `₹${total}`}</Table.Td>
         <Table.Td>
           {log.gst_applied ? (
-            <PDFDownloadLink
-              document={
-                <InvoiceDocument
-                  log={log}
-                  roomNumber={roomNumber}
-                  roomTypeName={roomTypeName}
-                  configMap={configMap}
-                  nights={nights}
-                />
-              }
-              fileName={`invoice-${log.id}.pdf`}
+            <Button
+              size="xs" variant="light" color="green" leftSection={<IconFileText size={14} />}
+              onClick={async () => {
+                const blob = await pdf(
+                  <InvoiceDocument log={log} roomNumber={roomNumber} roomTypeName={roomTypeName} configMap={configMap} nights={nights} />
+                ).toBlob();
+                window.open(URL.createObjectURL(blob), '_blank');
+              }}
             >
-              {({ loading }) => (
-                <Button size="xs" variant="light" color="green" leftSection={<IconFileText size={14} />} loading={loading}>
-                  Invoice
-                </Button>
-              )}
-            </PDFDownloadLink>
+              Invoice
+            </Button>
           ) : (
             <Text size="xs" c="dimmed">—</Text>
           )}

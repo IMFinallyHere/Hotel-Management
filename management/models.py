@@ -105,6 +105,7 @@ class RoomStayLogs(models.Model):
     shifted_from = models.ForeignKey('Rooms', models.SET_NULL, null=True, blank=True, related_name='shift_destinations')
     shift_reason = models.TextField(null=True, blank=True)
     is_ac = models.BooleanField(null=True, blank=True)
+    checked_in_by = models.ForeignKey(User, models.SET_NULL, null=True, blank=True, related_name='checkins')
 
 
 class Configurations(models.Model):
