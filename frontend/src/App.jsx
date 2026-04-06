@@ -1,4 +1,4 @@
-import { AppShell, NavLink, Title, Group, Avatar, Text, Burger, Menu, Badge, Box, ActionIcon, Indicator, Drawer, Stack, Button, Divider } from '@mantine/core';
+import { AppShell, NavLink, Title, Group, Avatar, Text, Burger, Menu, Badge, Box, ActionIcon, Indicator, Drawer, Stack, Button, Divider, Center, Loader } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import {
   IconHome, IconBuildingBank, IconUsers, IconSettings,
@@ -11,42 +11,44 @@ import {
   IconBan, IconCash, IconReceipt, IconScale, IconCoinRupee, IconBell, IconCalendarStats,
 } from '@tabler/icons-react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
+import { lazy, Suspense } from 'react';
 import ProtectedRoute from './components/ProtectedRoute';
-import Login from './pages/Login';
-import RoomTypes from './pages/RoomTypes';
-import RoomDashboard from './pages/RoomDashboard';
-import RoomDetail from './pages/RoomDetail';
-import PriceChart from './pages/PriceChart';
-import Customers from './pages/Customers';
-import CountryCodes from './pages/CountryCodes';
-import Configurations from './pages/Configurations';
-import Checkout from './pages/Checkout';
-import TodayOverview from './pages/TodayOverview';
-import RevenueReport from './pages/RevenueReport';
-import OccupancyReport from './pages/OccupancyReport';
-import GuestAnalytics from './pages/GuestAnalytics';
-import RoomPerformance from './pages/RoomPerformance';
-import ReservationFulfillment from './pages/ReservationFulfillment';
-import CustomerLifetimeValue from './pages/CustomerLifetimeValue';
-import SeasonalTrends from './pages/SeasonalTrends';
-import StayDuration from './pages/StayDuration';
-import ExtraBedUpsell from './pages/ExtraBedUpsell';
-import BookingPipeline from './pages/BookingPipeline';
-import UserManagement from './pages/UserManagement';
-import GroupManagement from './pages/GroupManagement';
-import Amenities from './pages/Amenities';
-import PermissionOverview from './pages/PermissionOverview';
-import NCRequests from './pages/NCRequests';
-import CashDrawer from './pages/CashDrawer';
-import Expenses from './pages/Expenses';
-import ProfitLoss from './pages/finance/ProfitLoss';
-import StaffSales from './pages/finance/StaffSales';
-import CashReconciliation from './pages/finance/CashReconciliation';
-import ExpenseReport from './pages/finance/ExpenseReport';
-import History from './pages/History';
-import GSTReport from './pages/GSTReport';
-import BulkBooking from './pages/BulkBookingModal';
-import Reservations from './pages/Reservations';
+
+const Login                = lazy(() => import('./pages/Login'));
+const RoomTypes            = lazy(() => import('./pages/RoomTypes'));
+const RoomDashboard        = lazy(() => import('./pages/RoomDashboard'));
+const RoomDetail           = lazy(() => import('./pages/RoomDetail'));
+const PriceChart           = lazy(() => import('./pages/PriceChart'));
+const Customers            = lazy(() => import('./pages/Customers'));
+const CountryCodes         = lazy(() => import('./pages/CountryCodes'));
+const Configurations       = lazy(() => import('./pages/Configurations'));
+const Checkout             = lazy(() => import('./pages/Checkout'));
+const TodayOverview        = lazy(() => import('./pages/TodayOverview'));
+const RevenueReport        = lazy(() => import('./pages/RevenueReport'));
+const OccupancyReport      = lazy(() => import('./pages/OccupancyReport'));
+const GuestAnalytics       = lazy(() => import('./pages/GuestAnalytics'));
+const RoomPerformance      = lazy(() => import('./pages/RoomPerformance'));
+const ReservationFulfillment = lazy(() => import('./pages/ReservationFulfillment'));
+const CustomerLifetimeValue  = lazy(() => import('./pages/CustomerLifetimeValue'));
+const SeasonalTrends       = lazy(() => import('./pages/SeasonalTrends'));
+const StayDuration         = lazy(() => import('./pages/StayDuration'));
+const ExtraBedUpsell       = lazy(() => import('./pages/ExtraBedUpsell'));
+const BookingPipeline      = lazy(() => import('./pages/BookingPipeline'));
+const UserManagement       = lazy(() => import('./pages/UserManagement'));
+const GroupManagement      = lazy(() => import('./pages/GroupManagement'));
+const Amenities            = lazy(() => import('./pages/Amenities'));
+const PermissionOverview   = lazy(() => import('./pages/PermissionOverview'));
+const NCRequests           = lazy(() => import('./pages/NCRequests'));
+const CashDrawer           = lazy(() => import('./pages/CashDrawer'));
+const Expenses             = lazy(() => import('./pages/Expenses'));
+const ProfitLoss           = lazy(() => import('./pages/finance/ProfitLoss'));
+const StaffSales           = lazy(() => import('./pages/finance/StaffSales'));
+const CashReconciliation   = lazy(() => import('./pages/finance/CashReconciliation'));
+const ExpenseReport        = lazy(() => import('./pages/finance/ExpenseReport'));
+const History              = lazy(() => import('./pages/History'));
+const GSTReport            = lazy(() => import('./pages/GSTReport'));
+const BulkBooking          = lazy(() => import('./pages/BulkBookingModal'));
+const Reservations         = lazy(() => import('./pages/Reservations'));
 import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
 import { useState, useEffect } from 'react';
 import usePermissions from './hooks/usePermissions';
@@ -605,10 +607,12 @@ function AppLayout() {
 export default function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/login" element={<Login />} />
-        <Route path="/*" element={<ProtectedRoute><AppLayout /></ProtectedRoute>} />
-      </Routes>
+      <Suspense fallback={<Center h="100vh"><Loader /></Center>}>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="/*" element={<ProtectedRoute><AppLayout /></ProtectedRoute>} />
+        </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 }
