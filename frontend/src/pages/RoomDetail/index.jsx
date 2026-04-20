@@ -119,7 +119,7 @@ export default function RoomDetail() {
       sum + Number(a.price) * a.quantity * (a.charge_type === 'per_night' ? nights : 1), 0);
     const overtimeFee = computeOvertimeFee(activeLog);
     const gstAmount = computeGst(activeLog, nights, configMap['gst_percent']);
-    const billTotal = activeLog.is_nc ? 0 : (roomTotal + amenityTotal + overtimeFee + gstAmount);
+    const billTotal = activeLog.is_nc ? 0 : (activeLog.gst_inclusive ? (roomTotal + amenityTotal + overtimeFee) : (roomTotal + amenityTotal + overtimeFee + gstAmount));
     const totalPaid = (activeLog.payments || []).reduce((s, p) => s + Number(p.amount), 0);
     const outstandingAmt = billTotal - totalPaid;
 

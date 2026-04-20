@@ -240,7 +240,7 @@ export default function Checkout() {
       sum + Number(a.price) * a.quantity * (a.charge_type === 'per_night' ? nights : 1), 0);
     const overtimeFee = computeOvertimeFee(record);
     const gstAmount = computeGst(record, nights, configMap['gst_percent']);
-    const billTotal = record.is_nc ? 0 : (roomTotal + amenityTotal + overtimeFee + gstAmount);
+    const billTotal = record.is_nc ? 0 : (record.gst_inclusive ? (roomTotal + amenityTotal + overtimeFee) : (roomTotal + amenityTotal + overtimeFee + gstAmount));
     const totalPaid = (record.payments || []).reduce((s, p) => s + Number(p.amount), 0);
     const outstanding = billTotal - totalPaid;
 
@@ -309,7 +309,7 @@ export default function Checkout() {
       sum + Number(a.price) * a.quantity * (a.charge_type === 'per_night' ? nights : 1), 0);
     const overtimeFee = computeOvertimeFee(log);
     const gstAmount = computeGst(log, nights, configMap['gst_percent']);
-    const total = log.is_nc ? 0 : (roomTotal + amenityTotal + overtimeFee + gstAmount);
+    const total = log.is_nc ? 0 : (log.gst_inclusive ? (roomTotal + amenityTotal + overtimeFee) : (roomTotal + amenityTotal + overtimeFee + gstAmount));
     const ncStatus = log.nc_status;
 
     const room = roomMap[log.room];
@@ -396,7 +396,7 @@ export default function Checkout() {
     : 0;
   const paymentOvertimeFee = currentPaymentLog ? computeOvertimeFee(currentPaymentLog) : 0;
   const paymentGstAmount = currentPaymentLog ? computeGst(currentPaymentLog, currentPaymentNights, configMap['gst_percent']) : 0;
-  const billTotal = currentPaymentLog?.is_nc ? 0 : (paymentRoomTotal + paymentAmenityTotal + paymentOvertimeFee + paymentGstAmount);
+  const billTotal = currentPaymentLog?.is_nc ? 0 : (currentPaymentLog?.gst_inclusive ? (paymentRoomTotal + paymentAmenityTotal + paymentOvertimeFee) : (paymentRoomTotal + paymentAmenityTotal + paymentOvertimeFee + paymentGstAmount));
   const outstanding = billTotal - totalPaid;
 
   return (

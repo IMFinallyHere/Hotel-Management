@@ -51,7 +51,7 @@ export default function History() {
     const amenityTotal = (log.amenities || []).reduce((sum, a) =>
       sum + Number(a.price) * a.quantity * (a.charge_type === 'per_night' ? nights : 1), 0);
     const gstAmount = computeGst(log, nights, configMap['gst_percent']);
-    const total = log.is_nc ? 0 : (roomTotal + amenityTotal + gstAmount);
+    const total = log.is_nc ? 0 : (log.gst_inclusive ? (roomTotal + amenityTotal) : (roomTotal + amenityTotal + gstAmount));
     const guests = (log.customers || []).map(c => c.name).join(', ') || '—';
 
     const room = roomMap[log.room];

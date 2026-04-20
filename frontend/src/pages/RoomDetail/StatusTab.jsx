@@ -341,7 +341,7 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
       sum + Number(a.price) * a.quantity * (a.charge_type === 'per_night' ? nights : 1), 0);
     const overtimeFee = computeOvertimeFee(activeLog);
     const gstAmount = computeGst(activeLog, nights, configMap['gst_percent']);
-    const totalCost = activeLog.is_nc ? 0 : (roomCost + amenityCost + overtimeFee + gstAmount);
+    const totalCost = activeLog.is_nc ? 0 : (activeLog.gst_inclusive ? (roomCost + amenityCost + overtimeFee) : (roomCost + amenityCost + overtimeFee + gstAmount));
     const maxBeds = room.beds + activeLog.extra_bed;
     const currentGuestCount = currentGuests.length;
     const canAddGuest = currentGuestCount < maxBeds;
@@ -376,7 +376,7 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
             <DescRow label="Overtime Fee" value={`₹${overtimeFee}`} />
           )}
           {gstAmount > 0 && (
-            <DescRow label={`GST (${configMap['gst_percent']}%)`} value={`₹${gstAmount}`} />
+            <DescRow label={`GST (${configMap['gst_percent']}%)${activeLog.gst_inclusive ? ' (incl.)' : ''}`} value={`₹${gstAmount}`} />
           )}
           <DescRow label="Total Cost" value={`₹${totalCost}`} />
         </Stack>
