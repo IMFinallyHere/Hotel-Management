@@ -171,7 +171,7 @@ class ReservationSerializer(serializers.ModelSerializer):
         check_in = attrs.get('check_in_date')
         check_out = attrs.get('check_out_date')
 
-        if check_in and check_out and check_out <= check_in:
+        if check_in and check_out and check_out < check_in:
             raise ValidationError({'check_out_date': 'Check-out date must be after check-in date.'})
 
         room = attrs.get('room')

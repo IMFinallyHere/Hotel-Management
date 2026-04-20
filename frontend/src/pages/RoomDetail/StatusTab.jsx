@@ -680,7 +680,8 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
                 label="Check-in → Checkout"
                 value={[new Date(), checkinCheckoutDate]}
                 onChange={([, end]) => { setCheckinCheckoutDate(end ?? null); setCheckinDateError(null); }}
-                minDate={new Date(new Date().setDate(new Date().getDate() + 1))}
+                minDate={new Date()}
+                allowSingleDateInRange
                 required
                 error={checkinDateError}
               />
