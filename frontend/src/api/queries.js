@@ -14,6 +14,7 @@ export const QUERY_KEYS = {
   priceChart: ['price-chart'],
   configurations: ['configurations'],
   amenities: ['amenities'],
+  paymentMethods: ['payment-methods'],
   stayLogAmenities: (logId) => ['stay-log-amenities', logId],
   users: ['users'],
   groups: ['groups'],
@@ -35,6 +36,7 @@ export const fetchGroupCustomers = (groupId) => api.get(`/v1/group/${groupId}/cu
 export const fetchPriceChart = () => api.get('/v1/price/chart/').then(r => r.data);
 export const fetchConfigurations = () => api.get('/v1/configurations/').then(r => r.data);
 export const fetchAmenities = () => api.get('/v1/amenities/').then(r => r.data);
+export const fetchPaymentMethods = (activeOnly = false) => api.get('/v1/payment-methods/', { params: activeOnly ? { active: 'true' } : {} }).then(r => r.data);
 export const fetchStayLogAmenities = (logId) => api.get(`/v1/stay-logs/${logId}/amenities/`).then(r => r.data);
 export const fetchUsers = () => api.get('/v1/users/').then(r => r.data);
 export const fetchGroups = () => api.get('/v1/groups/').then(r => r.data);

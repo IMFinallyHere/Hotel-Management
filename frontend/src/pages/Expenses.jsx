@@ -8,12 +8,10 @@ import { IconPlus } from '@tabler/icons-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import api from '../api/client';
-import { QUERY_KEYS_OPS, fetchExpenses } from '../api/queries';
+import { QUERY_KEYS, QUERY_KEYS_OPS, fetchExpenses, fetchPaymentMethods } from '../api/queries';
 import { notifySuccess, notifyError } from '../api/notify';
 import { parseApiError } from '../api/errorUtils';
 import usePermissions from '../hooks/usePermissions';
-
-const PAYMENT_TYPE_COLORS = { cash: 'green', upi: 'blue', card: 'violet', other: 'gray' };
 
 export default function Expenses() {
   const qc = useQueryClient();
@@ -32,24 +30,27 @@ export default function Expenses() {
     queryKey: QUERY_KEYS_OPS.expenses(queryParams),
     queryFn: () => fetchExpenses(queryParams),
   });
+  const { data: paymentMethods = [] } = useQuery({ queryKey: QUERY_KEYS.paymentMethods, queryFn: () => fetchPaymentMethods() });
+  const pmOptions = paymentMethods.filter(p => p.is_active).map(p => ({ value: String(p.id), label: p.name }));
+  const pmMap = Object.fromEntries(paymentMethods.map(p => [p.id, p.name]));
 
   const form = useForm({
     initialValues: {
       description: '',
       amount: 0,
-      payment_type: null,
+      payment_method: null,
       date: new Date(),
     },
     validate: {
       description: (v) => v.trim() ? null : 'Required',
       amount: (v) => v > 0 ? null : 'Amount must be greater than 0',
-      payment_type: (v) => v ? null : 'Required',
+      payment_method: (v) => v ? null : 'Required',
     },
   });
 
   const openAdd = () => {
     setEditing(null);
-    form.setValues({ description: '', amount: 0, payment_type: null, date: new Date() });
+    form.setValues({ description: '', amount: 0, payment_method: null, date: new Date() });
     open();
   };
 
@@ -58,7 +59,7 @@ export default function Expenses() {
     form.setValues({
       description: record.description,
       amount: Number(record.amount),
-      payment_type: record.payment_type,
+      payment_method: record.payment_method ? String(record.payment_method) : null,
       date: new Date(record.date),
     });
     open();
@@ -68,6 +69,7 @@ export default function Expenses() {
     mutationFn: (values) => {
       const payload = {
         ...values,
+        payment_method: Number(values.payment_method),
         date: dayjs(values.date).format('YYYY-MM-DD'),
       };
       return editing
@@ -107,8 +109,8 @@ export default function Expenses() {
       <Table.Td>{exp.description}</Table.Td>
       <Table.Td>₹{exp.amount}</Table.Td>
       <Table.Td>
-        <Badge color={PAYMENT_TYPE_COLORS[exp.payment_type]} variant="light">
-          {exp.payment_type.toUpperCase()}
+        <Badge variant="light" color="blue">
+          {pmMap[exp.payment_method] ?? exp.payment_method_name ?? '—'}
         </Badge>
       </Table.Td>
       <Table.Td>{exp.recorded_by_name ?? '—'}</Table.Td>
@@ -170,14 +172,9 @@ export default function Expenses() {
             <TextInput label="Description" {...form.getInputProps('description')} required />
             <NumberInput label="Amount (₹)" min={1} {...form.getInputProps('amount')} required />
             <Select
-              label="Payment Type"
-              data={[
-                { value: 'cash', label: 'Cash' },
-                { value: 'upi', label: 'UPI' },
-                { value: 'card', label: 'Card' },
-                { value: 'other', label: 'Other' },
-              ]}
-              {...form.getInputProps('payment_type')}
+              label="Payment Method"
+              data={pmOptions}
+              {...form.getInputProps('payment_method')}
               required
             />
             <DatePickerInput

@@ -9,8 +9,8 @@ from django.db.models import Q, Count
 from django.db.models import ProtectedError
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, Group, CustomerGroup, RoomsPriceChart, Reservation, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, RoomStatusLog
-from .serializers import RoomSerializer, RoomTypeSerializer, CountryCodeSerializer, CustomerSerializer, ConfigurationSerializer, CheckinSerializer, GroupCustomerSerializer, RoomsPriceChartSerializer, StayLogSerializer, StayLogUpdateSerializer, ReservationSerializer, ReservationReminderSerializer, AmenitySerializer, StayLogAmenitySerializer, ActiveStayLogSerializer, RoomNCRequestSerializer, PaymentSerializer, CashWithdrawalSerializer, ExpenseSerializer, ExtendStaySerializer, GraceSerializer, ShiftRoomSerializer, RoomStatusLogSerializer
+from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, Group, CustomerGroup, RoomsPriceChart, Reservation, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, RoomStatusLog, PaymentMethod
+from .serializers import RoomSerializer, RoomTypeSerializer, CountryCodeSerializer, CustomerSerializer, ConfigurationSerializer, CheckinSerializer, GroupCustomerSerializer, RoomsPriceChartSerializer, StayLogSerializer, StayLogUpdateSerializer, ReservationSerializer, ReservationReminderSerializer, AmenitySerializer, StayLogAmenitySerializer, ActiveStayLogSerializer, RoomNCRequestSerializer, PaymentSerializer, CashWithdrawalSerializer, ExpenseSerializer, ExtendStaySerializer, GraceSerializer, ShiftRoomSerializer, RoomStatusLogSerializer, PaymentMethodSerializer
 from .permissions import report_permission, HasModelPermission
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.permissions import DjangoModelPermissions
@@ -299,6 +299,30 @@ class AmenityDetail(generics.RetrieveUpdateDestroyAPIView):
             return super().destroy(request, *args, **kwargs)
         except ProtectedError:
             return Response({'error': 'Cannot delete amenity — it is in use by one or more stays.'}, status=400)
+
+
+class PaymentMethodListCreate(generics.ListCreateAPIView):
+    serializer_class = PaymentMethodSerializer
+    permission_classes = [DjangoModelPermissions]
+
+    def get_queryset(self):
+        qs = PaymentMethod.objects.order_by('name')
+        active_only = self.request.query_params.get('active')
+        if active_only == 'true':
+            qs = qs.filter(is_active=True)
+        return qs
+
+
+class PaymentMethodDetail(generics.RetrieveUpdateDestroyAPIView):
+    queryset = PaymentMethod.objects.all()
+    serializer_class = PaymentMethodSerializer
+    permission_classes = [DjangoModelPermissions]
+
+    def destroy(self, request, *args, **kwargs):
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except ProtectedError:
+            return Response({'error': 'Cannot delete payment method — it is in use by existing payments or expenses.'}, status=400)
 
 
 class StayLogAmenityListCreate(generics.ListCreateAPIView):
@@ -1124,7 +1148,7 @@ class UserPermissionsView(APIView):
             'view_expense', 'view_roomncrequest', 'view_cashwithdrawal',
             'view_reservation',
             'view_roomtype', 'view_roomspricechart', 'view_countrycodes',
-            'view_amenity', 'view_configurations',
+            'view_amenity', 'view_configurations', 'view_paymentmethod',
         ]
         result = {p: request.user.has_perm(f'management.{p}') for p in report_perms}
         for p in admin_perms:
@@ -1144,6 +1168,7 @@ class UserPermissionsView(APIView):
             'add_countrycodes', 'change_countrycodes', 'delete_countrycodes',
             'add_amenity', 'change_amenity', 'delete_amenity',
             'add_configurations', 'change_configurations', 'delete_configurations',
+            'add_paymentmethod', 'change_paymentmethod', 'delete_paymentmethod',
         ]
         for p in crud_perms:
             result[p] = request.user.has_perm(f'management.{p}')
@@ -1361,12 +1386,12 @@ class PLReportView(APIView):
             amenity_revenue += a_rev
             revenue_by_day[log.check_out.date().isoformat()] += r_rev + a_rev
 
-        expenses = Expense.objects.filter(date__gte=start, date__lte=end)
+        expenses = Expense.objects.filter(date__gte=start, date__lte=end).select_related('payment_method')
         total_expenses = sum(e.amount for e in expenses)
         by_payment_type = defaultdict(lambda: Decimal(0))
         expense_by_day = defaultdict(lambda: Decimal(0))
         for e in expenses:
-            by_payment_type[e.payment_type] += e.amount
+            by_payment_type[e.payment_method.name if e.payment_method else 'Other'] += e.amount
             expense_by_day[e.date.isoformat()] += e.amount
 
         all_days = sorted(set(list(revenue_by_day.keys()) + list(expense_by_day.keys())))
@@ -1401,16 +1426,17 @@ class StaffSalesView(APIView):
         payments = Payment.objects.filter(
             created_on__date__gte=start,
             created_on__date__lte=end,
-        ).select_related('processed_by')
+        ).select_related('processed_by', 'payment_method')
 
         staff_data = defaultdict(lambda: {'total_collected': Decimal(0), 'by_type': defaultdict(lambda: Decimal(0))})
         overall_by_type = defaultdict(lambda: Decimal(0))
 
         for p in payments:
             name = (p.processed_by.get_full_name() or p.processed_by.username) if p.processed_by else 'Unknown'
+            pm_name = p.payment_method.name if p.payment_method else 'Other'
             staff_data[name]['total_collected'] += p.amount
-            staff_data[name]['by_type'][p.payment_type] += p.amount
-            overall_by_type[p.payment_type] += p.amount
+            staff_data[name]['by_type'][pm_name] += p.amount
+            overall_by_type[pm_name] += p.amount
 
         staff_list = []
         for name, d in staff_data.items():
@@ -1436,7 +1462,7 @@ class CashReconciliationView(APIView):
         end = _parse_date(request.query_params.get('end_date'), today)
 
         cash_payments = Payment.objects.filter(
-            payment_type='cash',
+            payment_method__name__iexact='cash',
             created_on__date__gte=start,
             created_on__date__lte=end,
         )
@@ -1450,7 +1476,7 @@ class CashReconciliationView(APIView):
         total_withdrawals = sum(w.amount for w in withdrawals)
 
         cash_expenses = Expense.objects.filter(
-            payment_type='cash',
+            payment_method__name__iexact='cash',
             date__gte=start,
             date__lte=end,
         ).select_related('recorded_by')
@@ -1492,7 +1518,7 @@ class ExpenseReportView(APIView):
         expenses = Expense.objects.filter(
             date__gte=start,
             date__lte=end,
-        ).select_related('recorded_by').order_by('date')
+        ).select_related('recorded_by', 'payment_method').order_by('date')
 
         total = Decimal(0)
         by_payment_type = defaultdict(lambda: Decimal(0))
@@ -1500,12 +1526,13 @@ class ExpenseReportView(APIView):
 
         for e in expenses:
             total += e.amount
-            by_payment_type[e.payment_type] += e.amount
+            pm_name = e.payment_method.name if e.payment_method else 'Other'
+            by_payment_type[pm_name] += e.amount
             by_day[e.date.isoformat()].append({
                 'id': e.id,
                 'description': e.description,
                 'amount': float(e.amount),
-                'payment_type': e.payment_type,
+                'payment_type': pm_name,
                 'recorded_by': e.recorded_by.get_full_name() or e.recorded_by.username if e.recorded_by else None,
             })
 

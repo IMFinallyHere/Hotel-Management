@@ -37,6 +37,7 @@ const BookingPipeline      = lazy(() => import('./pages/BookingPipeline'));
 const UserManagement       = lazy(() => import('./pages/UserManagement'));
 const GroupManagement      = lazy(() => import('./pages/GroupManagement'));
 const Amenities            = lazy(() => import('./pages/Amenities'));
+const PaymentMethods       = lazy(() => import('./pages/PaymentMethods'));
 const PermissionOverview   = lazy(() => import('./pages/PermissionOverview'));
 const NCRequests           = lazy(() => import('./pages/NCRequests'));
 const CashDrawer           = lazy(() => import('./pages/CashDrawer'));
@@ -102,7 +103,7 @@ function AppLayout() {
 
   const roomsActive = path === '/rooms' || path.startsWith('/rooms/');
   const operationsActive = roomsActive || path === '/checkout' || path === '/customers' || path === '/nc-requests' || path === '/cash-drawer' || path === '/expenses' || path === '/history' || path === '/bulk-booking' || path === '/reservations';
-  const configActive = ['/configurations', '/amenities', '/room-types', '/price-chart', '/country-codes'].includes(path);
+  const configActive = ['/configurations', '/amenities', '/room-types', '/price-chart', '/country-codes', '/payment-methods'].includes(path);
   const reportsActive = path.startsWith('/reports');
   const financeActive = path.startsWith('/finance');
   const adminActive = path.startsWith('/admin');
@@ -471,6 +472,15 @@ function AppLayout() {
             active={path === '/amenities'}
           />
           )}
+          {(permissions.view_paymentmethod || permissions.is_superuser) && (
+          <NavLink
+            {...NL}
+            label={nl('Payment Methods')}
+            leftSection={<IconCurrencyRupee size={14} color="rgba(255,255,255,0.6)" />}
+            onClick={() => { navigate('/payment-methods'); closeNav(); }}
+            active={path === '/payment-methods'}
+          />
+          )}
           {(permissions.view_configurations || permissions.is_superuser) && (
           <NavLink
             {...NL}
@@ -574,6 +584,7 @@ function AppLayout() {
           <Route path="/country-codes" element={<CountryCodes />} />
           <Route path="/configurations" element={<Configurations />} />
           <Route path="/amenities" element={<Amenities />} />
+          <Route path="/payment-methods" element={<PaymentMethods />} />
           <Route path="/checkout" element={<Checkout />} />
           <Route path="/reports/today" element={<TodayOverview />} />
           <Route path="/reports/revenue" element={<RevenueReport />} />

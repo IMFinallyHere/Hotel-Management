@@ -199,7 +199,7 @@ export default function Reservations() {
                     <Table.Td>₹{Number(r.price).toLocaleString()}</Table.Td>
                     <Table.Td>
                       {Number(r.advance_amount) > 0
-                        ? <Text size="sm">₹{Number(r.advance_amount).toLocaleString()} <Text span size="xs" c="dimmed">({r.advance_payment_type})</Text></Text>
+                        ? <Text size="sm">₹{Number(r.advance_amount).toLocaleString()} <Text span size="xs" c="dimmed">({r.advance_payment_method_name ?? '—'})</Text></Text>
                         : <Text size="sm" c="dimmed">—</Text>
                       }
                     </Table.Td>

@@ -14,7 +14,7 @@ import api from '../api/client';
 import {
   QUERY_KEYS, searchCustomers,
   fetchRooms, fetchRoomTypes, fetchActiveLogs, fetchReservations,
-  fetchPriceChart, fetchConfigurations, fetchCountryCodes,
+  fetchPriceChart, fetchConfigurations, fetchCountryCodes, fetchPaymentMethods,
 } from '../api/queries';
 import { parseApiError } from '../api/errorUtils';
 import { parseConfigs } from '../utils/configUtils';
@@ -169,6 +169,7 @@ export default function BulkBooking() {
   const { data: priceChart = [] } = useQuery({ queryKey: QUERY_KEYS.priceChart, queryFn: fetchPriceChart });
   const { data: configs = [] } = useQuery({ queryKey: QUERY_KEYS.configurations, queryFn: fetchConfigurations });
   const { data: codes = [] } = useQuery({ queryKey: QUERY_KEYS.countryCodes, queryFn: fetchCountryCodes });
+  const { data: paymentMethods = [] } = useQuery({ queryKey: QUERY_KEYS.paymentMethods, queryFn: () => fetchPaymentMethods() });
 
   const configMap = parseConfigs(configs);
   const gstPercent = configMap['gst_percent'] ?? '0';
@@ -192,9 +193,9 @@ export default function BulkBooking() {
   const [checkoutDate, setCheckoutDate] = useState(null);
   const [gstMode, setGstMode] = useState('added');
   const [roomConfigs, setRoomConfigs] = useState({});
-  const [advPaymentType, setAdvPaymentType] = useState('cash');
+  const [advPaymentType, setAdvPaymentType] = useState(null);
   const [advPaymentAmount, setAdvPaymentAmount] = useState(0);
-  const [resAdvPaymentType, setResAdvPaymentType] = useState('cash');
+  const [resAdvPaymentType, setResAdvPaymentType] = useState(null);
   const [resAdvPaymentAmount, setResAdvPaymentAmount] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [results, setResults] = useState(null); // array of { roomId, status, message }
@@ -456,7 +457,7 @@ export default function BulkBooking() {
               check_out_date: dayjs(checkoutDate).format('YYYY-MM-DD'),
               price: config?.price ?? 0,
               advance_amount: resAdvPaymentAmount || 0,
-              advance_payment_type: resAdvPaymentAmount > 0 ? resAdvPaymentType : '',
+              advance_payment_method: resAdvPaymentAmount > 0 && resAdvPaymentType ? Number(resAdvPaymentType) : null,
             });
             roomResults.push({ roomId: room.id, status: 'success', message: 'Reserved' });
           } catch (e) {
@@ -500,7 +501,7 @@ export default function BulkBooking() {
             });
             if (advPaymentAmount > 0 && ci.log_id) {
               await api.post(`/v1/stay-logs/${ci.log_id}/payments/`, {
-                payment_type: advPaymentType, amount: advPaymentAmount,
+                payment_method: Number(advPaymentType), amount: advPaymentAmount,
               }).catch(() => {});
             }
             roomResults.push({ roomId: room.id, status: 'success', message: 'Checked in' });
@@ -841,8 +842,8 @@ export default function BulkBooking() {
               {bookingType === 'checkin' && (
                 <>
                   <Divider mt="xs" label="Advance Payment" labelPosition="left" />
-                  <Select size="sm" label="Payment Type"
-                    data={[{ value: 'cash', label: 'Cash' }, { value: 'upi', label: 'UPI' }, { value: 'card', label: 'Card' }, { value: 'other', label: 'Other' }]}
+                  <Select size="sm" label="Payment Method"
+                    data={paymentMethods.filter(p => p.is_active).map(p => ({ value: String(p.id), label: p.name }))}
                     value={advPaymentType} onChange={setAdvPaymentType}
                   />
                   <NumberInput size="sm" label="Amount per room (₹)" min={0}
@@ -852,8 +853,8 @@ export default function BulkBooking() {
               {bookingType === 'reservation' && (
                 <>
                   <Divider mt="xs" label="Advance Payment" labelPosition="left" />
-                  <Select size="sm" label="Payment Type"
-                    data={[{ value: 'cash', label: 'Cash' }, { value: 'upi', label: 'UPI' }, { value: 'card', label: 'Card' }, { value: 'other', label: 'Other' }]}
+                  <Select size="sm" label="Payment Method"
+                    data={paymentMethods.filter(p => p.is_active).map(p => ({ value: String(p.id), label: p.name }))}
                     value={resAdvPaymentType} onChange={setResAdvPaymentType}
                   />
                   <NumberInput size="sm" label="Advance amount (₹)" min={0}
@@ -940,7 +941,7 @@ export default function BulkBooking() {
 
         {bookingType === 'checkin' && advPaymentAmount > 0 && (
           <Text size="sm" c="dimmed">
-            Advance payment of ₹{advPaymentAmount} ({advPaymentType}) will be recorded per room.
+            Advance payment of ₹{advPaymentAmount} ({paymentMethods.find(p => String(p.id) === advPaymentType)?.name ?? '—'}) will be recorded per room.
           </Text>
         )}
       </Stack>

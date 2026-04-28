@@ -16,7 +16,7 @@ import dayjs from 'dayjs';
 import api from '../../api/client';
 import {
   QUERY_KEYS, QUERY_KEYS_OPS,
-  fetchGroupCustomers, fetchConfigurations, fetchCountryCodes, fetchAmenities, fetchPriceChart, searchCustomers,
+  fetchGroupCustomers, fetchConfigurations, fetchCountryCodes, fetchAmenities, fetchPriceChart, searchCustomers, fetchPaymentMethods,
 } from '../../api/queries';
 import { compressImage } from '../../utils/imageUtils';
 import CustomerSelectWithAdd from '../../components/CustomerSelectWithAdd';
@@ -71,7 +71,7 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
   const [sharedCountryCode, setSharedCountryCode] = useState(null);
   const [sharedAddress, setSharedAddress] = useState('');
   const [sharedPincode, setSharedPincode] = useState('');
-  const [advPaymentType, setAdvPaymentType] = useState('cash');
+  const [advPaymentType, setAdvPaymentType] = useState(null);
   const [advPaymentAmount, setAdvPaymentAmount] = useState(0);
   const ciDebounceTimers = useRef({});
 
@@ -177,6 +177,7 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
   });
 
   const { data: allAmenities = [] } = useQuery({ queryKey: QUERY_KEYS.amenities, queryFn: fetchAmenities });
+  const { data: paymentMethods = [] } = useQuery({ queryKey: QUERY_KEYS.paymentMethods, queryFn: () => fetchPaymentMethods() });
 
   const addAmenityMutation = useMutation({
     mutationFn: ({ logId, amenity, quantity }) => api.post(`/v1/stay-logs/${logId}/amenities/`, { amenity, quantity }),
@@ -279,7 +280,7 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
       if (advPaymentAmount > 0 && checkinData.log_id) {
         try {
           await api.post(`/v1/stay-logs/${checkinData.log_id}/payments/`, {
-            payment_type: advPaymentType,
+            payment_method: Number(advPaymentType),
             amount: advPaymentAmount,
           });
         } catch {
@@ -851,12 +852,7 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
           <Stack gap="xs">
             <Select
               label="Payment Type"
-              data={[
-                { value: 'cash', label: 'Cash' },
-                { value: 'upi', label: 'UPI' },
-                { value: 'card', label: 'Card' },
-                { value: 'other', label: 'Other' },
-              ]}
+              data={paymentMethods.filter(p => p.is_active).map(p => ({ value: String(p.id), label: p.name }))}
               value={advPaymentType}
               onChange={setAdvPaymentType}
               size="sm"

@@ -113,15 +113,23 @@ class Configurations(models.Model):
     value = models.TextField(null=True)
 
 
+class PaymentMethod(models.Model):
+    name = models.CharField(max_length=50, unique=True)
+    is_active = models.BooleanField(default=True)
+    created_on = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name
+
+
 class Reservation(models.Model):
-    PAYMENT_TYPES = [('cash', 'Cash'), ('upi', 'UPI'), ('card', 'Card'), ('other', 'Other')]
     room = models.ForeignKey(Rooms, models.CASCADE, 'reservations')
     group = models.ForeignKey(Group, models.PROTECT, 'reservations')
     check_in_date = models.DateField()
     check_out_date = models.DateField()
     price = models.DecimalField(max_digits=7, decimal_places=0, default=0)
     advance_amount = models.DecimalField(max_digits=7, decimal_places=0, default=0)
-    advance_payment_type = models.CharField(max_length=10, choices=PAYMENT_TYPES, default='cash', blank=True)
+    advance_payment_method = models.ForeignKey(PaymentMethod, models.SET_NULL, null=True, blank=True, related_name='reservations')
     created_on = models.DateTimeField(auto_now_add=True)
 
 
@@ -184,9 +192,8 @@ class RoomNCRequest(models.Model):
 
 
 class Payment(models.Model):
-    TYPES = [('cash', 'Cash'), ('upi', 'UPI'), ('card', 'Card'), ('other', 'Other')]
     stay_log = models.ForeignKey(RoomStayLogs, models.CASCADE, 'payments')
-    payment_type = models.CharField(max_length=10, choices=TYPES)
+    payment_method = models.ForeignKey(PaymentMethod, models.PROTECT, related_name='payments')
     amount = models.DecimalField(max_digits=10, decimal_places=0)
     processed_by = models.ForeignKey(User, models.SET_NULL, null=True, related_name='payments_processed')
     note = models.CharField(max_length=200, blank=True)
@@ -206,10 +213,9 @@ class CashWithdrawal(models.Model):
 
 
 class Expense(models.Model):
-    PAYMENT_TYPES = [('cash', 'Cash'), ('upi', 'UPI'), ('card', 'Card'), ('other', 'Other')]
     description = models.CharField(max_length=200)
     amount = models.DecimalField(max_digits=10, decimal_places=0)
-    payment_type = models.CharField(max_length=10, choices=PAYMENT_TYPES)
+    payment_method = models.ForeignKey(PaymentMethod, models.PROTECT, related_name='expenses')
     recorded_by = models.ForeignKey(User, models.SET_NULL, null=True, related_name='expenses')
     date = models.DateField(default=timezone.localdate)
     created_on = models.DateTimeField(auto_now_add=True)

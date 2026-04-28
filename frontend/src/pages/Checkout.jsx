@@ -7,7 +7,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { pdf } from '@react-pdf/renderer';
 import dayjs from 'dayjs';
 import api from '../api/client';
-import { QUERY_KEYS, QUERY_KEYS_OPS, fetchActiveLogs, fetchRooms, fetchAmenities, fetchGroupCustomers, fetchConfigurations, fetchRoomTypes } from '../api/queries';
+import { QUERY_KEYS, QUERY_KEYS_OPS, fetchActiveLogs, fetchRooms, fetchAmenities, fetchGroupCustomers, fetchConfigurations, fetchRoomTypes, fetchPaymentMethods } from '../api/queries';
 import { notifySuccess, notifyError } from '../api/notify';
 import { parseApiError } from '../api/errorUtils';
 import { parseConfigs, computeOvertimeFee, computeGst } from '../utils/configUtils';
@@ -81,6 +81,7 @@ export default function Checkout() {
   const { data: amenities = [] } = useQuery({ queryKey: QUERY_KEYS.amenities, queryFn: fetchAmenities });
   const { data: configs = [] } = useQuery({ queryKey: QUERY_KEYS.configurations, queryFn: fetchConfigurations });
   const { data: roomTypes = [] } = useQuery({ queryKey: QUERY_KEYS.roomTypes, queryFn: fetchRoomTypes });
+  const { data: paymentMethods = [] } = useQuery({ queryKey: QUERY_KEYS.paymentMethods, queryFn: () => fetchPaymentMethods() });
   const configMap = parseConfigs(configs);
   const roomTypeMap = Object.fromEntries(roomTypes.map(rt => [rt.id, rt.name]));
 
@@ -140,8 +141,8 @@ export default function Checkout() {
   });
 
   const payAndCheckoutMutation = useMutation({
-    mutationFn: async ({ logId, payment_type, amount }) => {
-      await api.post(`/v1/stay-logs/${logId}/payments/`, { payment_type, amount, note: 'Collected at checkout' });
+    mutationFn: async ({ logId, payment_method, amount }) => {
+      await api.post(`/v1/stay-logs/${logId}/payments/`, { payment_method, amount, note: 'Collected at checkout' });
       await api.post(`/v1/checkout/${logId}/`);
     },
     onSuccess: () => {
@@ -176,8 +177,8 @@ export default function Checkout() {
   });
 
   const addPaymentMutation = useMutation({
-    mutationFn: ({ logId, payment_type, amount, note }) =>
-      api.post(`/v1/stay-logs/${logId}/payments/`, { payment_type, amount, note }),
+    mutationFn: ({ logId, payment_method, amount, note }) =>
+      api.post(`/v1/stay-logs/${logId}/payments/`, { payment_method, amount, note }),
     onSuccess: () => {
       qc.invalidateQueries(QUERY_KEYS.activeLogs);
       setNewPaymentType(null);
@@ -288,19 +289,14 @@ export default function Checkout() {
 
   const handleAddPayment = () => {
     if (!newPaymentType || !newPaymentAmount || !paymentLog) return;
-    addPaymentMutation.mutate({ logId: paymentLog.id, payment_type: newPaymentType, amount: newPaymentAmount, note: newPaymentNote });
+    addPaymentMutation.mutate({ logId: paymentLog.id, payment_method: Number(newPaymentType), amount: newPaymentAmount, note: newPaymentNote });
   };
 
   // Keep selected logs in sync with latest data
   const currentLog = selectedLog ? logs.find(l => l.id === selectedLog.id) ?? selectedLog : null;
   const currentPaymentLog = paymentLog ? logs.find(l => l.id === paymentLog.id) ?? paymentLog : null;
 
-  const paymentTypeOptions = [
-    { value: 'cash', label: 'Cash' },
-    { value: 'upi', label: 'UPI' },
-    { value: 'card', label: 'Card' },
-    { value: 'other', label: 'Other' },
-  ];
+  const paymentTypeOptions = paymentMethods.filter(p => p.is_active).map(p => ({ value: String(p.id), label: p.name }));
 
   const rows = filteredLogs.map((log) => {
     const nights = Math.max(1, dayjs().diff(dayjs(log.check_in), 'day'));
@@ -532,7 +528,7 @@ export default function Checkout() {
             <Table.Tbody>
               {logPayments.map(p => (
                 <Table.Tr key={p.id}>
-                  <Table.Td><Badge size="sm" variant="light">{p.payment_type.toUpperCase()}</Badge></Table.Td>
+                  <Table.Td><Badge size="sm" variant="light">{p.payment_method_name ?? p.payment_method}</Badge></Table.Td>
                   <Table.Td>₹{p.amount}</Table.Td>
                   <Table.Td>{p.processed_by_name ?? '—'}</Table.Td>
                   <Table.Td>{p.note || '—'}</Table.Td>
@@ -716,7 +712,7 @@ export default function Checkout() {
             loading={payAndCheckoutMutation.isPending}
             onClick={() => payAndCheckoutMutation.mutate({
               logId: payCheckoutLog.id,
-              payment_type: payCheckoutType,
+              payment_method: Number(payCheckoutType),
               amount: payCheckoutAmount,
             })}
           >

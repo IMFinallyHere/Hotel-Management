@@ -33,7 +33,7 @@ const OPS_KEYS = [
 
 const SETTINGS_KEYS = [
   'view_roomtype', 'view_roomspricechart', 'view_countrycodes',
-  'view_amenity', 'view_configurations',
+  'view_amenity', 'view_configurations', 'view_paymentmethod',
 ];
 
 export default function usePermissions() {

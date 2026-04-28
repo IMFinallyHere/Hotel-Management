@@ -12,7 +12,7 @@ import dayjs from 'dayjs';
 import api from '../../api/client';
 import {
   QUERY_KEYS,
-  fetchRoom, fetchRooms, fetchActiveLogs, fetchRoomReservations, fetchConfigurations,
+  fetchRoom, fetchRooms, fetchActiveLogs, fetchRoomReservations, fetchConfigurations, fetchPaymentMethods,
 } from '../../api/queries';
 import { notifySuccess, notifyError } from '../../api/notify';
 import { parseApiError } from '../../api/errorUtils';
@@ -39,6 +39,7 @@ export default function RoomDetail() {
   const { data: configs = [] } = useQuery({ queryKey: QUERY_KEYS.configurations, queryFn: fetchConfigurations });
   const configMap = parseConfigs(configs);
   const { data: allRooms = [] } = useQuery({ queryKey: QUERY_KEYS.rooms, queryFn: fetchRooms });
+  const { data: paymentMethods = [] } = useQuery({ queryKey: QUERY_KEYS.paymentMethods, queryFn: () => fetchPaymentMethods() });
 
   const checkoutMutation = useMutation({
     mutationFn: (logId) => api.post(`/v1/checkout/${logId}/`),
@@ -78,8 +79,8 @@ export default function RoomDetail() {
   });
 
   const payAndCheckoutMutation = useMutation({
-    mutationFn: async ({ logId, payment_type, amount }) => {
-      await api.post(`/v1/stay-logs/${logId}/payments/`, { payment_type, amount, note: 'Collected at checkout' });
+    mutationFn: async ({ logId, payment_method, amount }) => {
+      await api.post(`/v1/stay-logs/${logId}/payments/`, { payment_method, amount, note: 'Collected at checkout' });
       await api.post(`/v1/checkout/${logId}/`);
     },
     onSuccess: () => {
@@ -151,12 +152,7 @@ export default function RoomDetail() {
     openShift();
   };
 
-  const paymentTypeOptions = [
-    { value: 'cash', label: 'Cash' },
-    { value: 'upi', label: 'UPI' },
-    { value: 'card', label: 'Card' },
-    { value: 'other', label: 'Other' },
-  ];
+  const paymentTypeOptions = paymentMethods.filter(p => p.is_active).map(p => ({ value: String(p.id), label: p.name }));
 
   return (
     <div>
@@ -282,7 +278,7 @@ export default function RoomDetail() {
             loading={payAndCheckoutMutation.isPending}
             onClick={() => payAndCheckoutMutation.mutate({
               logId: activeLog.id,
-              payment_type: payCheckoutType,
+              payment_method: Number(payCheckoutType),
               amount: payCheckoutAmount,
             })}
           >
