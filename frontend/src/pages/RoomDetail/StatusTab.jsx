@@ -60,6 +60,7 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
   const defaultCheckoutTime = configMap['default_checkout_time'] ?? '11:00';
 
   const [guestRows, setGuestRows] = useState([createEmptyGuest()]);
+  const ciToday = new Date().toISOString().slice(0, 10);
   const [checkinPrice, setCheckinPrice] = useState(0);
   const [checkinExtraBed, setCheckinExtraBed] = useState(0);
   const [checkinExtraPerBedPrice, setCheckinExtraPerBedPrice] = useState(0);
@@ -77,6 +78,16 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
 
   const { data: codes = [] } = useQuery({ queryKey: QUERY_KEYS.countryCodes, queryFn: fetchCountryCodes });
   const { data: priceChart = [] } = useQuery({ queryKey: QUERY_KEYS.priceChart, queryFn: fetchPriceChart });
+
+  const getEffectivePrice = () => {
+    const chartEntry = priceChart.find(e => e.room === room.id && e.date === ciToday);
+    return Number(chartEntry?.price ?? room.price ?? 0);
+  };
+
+  useEffect(() => {
+    setCheckinPrice(getEffectivePrice());
+  }, [priceChart, room.id]);
+
   const indiaId = useMemo(() => {
     const india = codes.find(c => c.country_code === 91);
     return india ? String(india.id) : null;
@@ -90,7 +101,7 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
 
   const resetCheckinForm = () => {
     setGuestRows([createEmptyGuest()]);
-    setCheckinPrice(0);
+    setCheckinPrice(getEffectivePrice());
     setCheckinExtraBed(0);
     setCheckinExtraPerBedPrice(0);
     setCheckinCheckoutDate(null);
@@ -643,9 +654,7 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
   const ciGuestExceeded = guestRows.length > ciMaxAllowed;
   const gstPercent = configMap['gst_percent'] ?? '0';
 
-  const ciToday = new Date().toISOString().slice(0, 10);
-  const ciChartPrice = priceChart.find(e => e.room === room.id && e.date === ciToday)?.price;
-  const ciEffectivePrice = checkinPrice > 0 ? checkinPrice : (ciChartPrice ?? room.price ?? 0);
+  const ciEffectivePrice = checkinPrice;
   const ciPerNight = Number(ciEffectivePrice) + checkinExtraBed * Number(checkinExtraPerBedPrice);
   const ciRoomSubtotal = ciPerNight * ciNights;
   const ciGstRate = parseFloat(gstPercent) / 100;
@@ -666,8 +675,7 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
           <Text fw={500} size="sm" mb="sm">Room & Stay Details</Text>
           <Grid gutter="sm" mb="md">
             <Grid.Col span={{ base: 12, sm: 6 }}>
-              <NumberInput label="Price (₹, 0 = auto)" min={0} value={checkinPrice}
-                onChange={setCheckinPrice} placeholder={String(room.price)} />
+              <NumberInput label="Price (₹)" min={0} value={checkinPrice} onChange={setCheckinPrice} />
             </Grid.Col>
             <Grid.Col span={{ base: 12, sm: 6 }}>
               <NumberInput label="Extra Beds" min={0} value={checkinExtraBed} onChange={setCheckinExtraBed} />
