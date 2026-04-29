@@ -4,14 +4,17 @@ import {
   Loader, Center, Paper, Select, Pagination, Tooltip,
 } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
-import { IconSearch, IconX, IconDoor, IconTrash } from '@tabler/icons-react';
+import { IconSearch, IconX, IconDoor, IconTrash, IconArrowRight } from '@tabler/icons-react';
+import { useDisclosure } from '@mantine/hooks';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
 import api from '../api/client';
+import { QUERY_KEYS, fetchRooms } from '../api/queries';
 import { notifySuccess, notifyError } from '../api/notify';
 import { parseApiError } from '../api/errorUtils';
 import usePermissions from '../hooks/usePermissions';
+import ConvertCheckinModal from './RoomDetail/ConvertCheckinModal';
 
 const PAGE_SIZE = 20;
 
@@ -38,6 +41,10 @@ export default function Reservations() {
   const [checkOutRange, setCheckOutRange] = useState([null, null]);
   const [status, setStatus] = useState('upcoming'); // upcoming | past | all
   const [page, setPage] = useState(1);
+
+  const [convertReservation, setConvertReservation] = useState(null);
+  const [convertRoom, setConvertRoom] = useState(null);
+  const [convertOpened, { open: openConvert, close: closeConvert }] = useDisclosure(false);
 
   // Active filters — only applied when user hits Search or on mount
   const [activeParams, setActiveParams] = useState({ status: 'upcoming' });
@@ -87,6 +94,17 @@ export default function Reservations() {
   const totalPages = Math.ceil(reservations.length / PAGE_SIZE);
 
   const canDelete = permissions.delete_reservation || permissions.is_superuser;
+  const canConvert = permissions.add_roomstaylogs || permissions.is_superuser;
+
+  const { data: rooms = [] } = useQuery({ queryKey: QUERY_KEYS.rooms, queryFn: fetchRooms });
+
+  const handleConvert = (reservation) => {
+    const room = rooms.find(r => r.id === reservation.room);
+    if (!room) { notifyError('Room data not loaded yet, try again.'); return; }
+    setConvertReservation(reservation);
+    setConvertRoom(room);
+    openConvert();
+  };
 
   return (
     <Stack gap="md">
@@ -216,6 +234,16 @@ export default function Reservations() {
                             <IconDoor size={14} />
                           </ActionIcon>
                         </Tooltip>
+                        {canConvert && !isPast && (
+                          <Tooltip label="Convert to check-in">
+                            <ActionIcon
+                              size="sm" variant="subtle" color="blue"
+                              onClick={() => handleConvert(r)}
+                            >
+                              <IconArrowRight size={14} />
+                            </ActionIcon>
+                          </Tooltip>
+                        )}
                         {canDelete && !isPast && (
                           <Tooltip label="Cancel reservation">
                             <ActionIcon
@@ -238,6 +266,14 @@ export default function Reservations() {
             <Pagination total={totalPages} value={page} onChange={setPage} size="sm" />
           )}
         </Stack>
+      )}
+      {convertReservation && convertRoom && (
+        <ConvertCheckinModal
+          opened={convertOpened}
+          onClose={() => { closeConvert(); qc.invalidateQueries({ queryKey: ['reservations-search'] }); }}
+          reservation={convertReservation}
+          room={convertRoom}
+        />
       )}
     </Stack>
   );

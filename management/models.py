@@ -219,3 +219,9 @@ class Expense(models.Model):
     recorded_by = models.ForeignKey(User, models.SET_NULL, null=True, related_name='expenses')
     date = models.DateField(default=timezone.localdate)
     created_on = models.DateTimeField(auto_now_add=True)
+
+
+class ExpenseAttachment(models.Model):
+    expense = models.ForeignKey(Expense, models.CASCADE, related_name='attachments')
+    file = models.FileField(upload_to='expense_attachments/')
+    uploaded_on = models.DateTimeField(auto_now_add=True)

@@ -3,7 +3,7 @@ from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, RoomsPriceChart, Reservation, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, RoomStatusLog, PaymentMethod
+from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, RoomsPriceChart, Reservation, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, ExpenseAttachment, RoomStatusLog, PaymentMethod
 
 
 class RoomTypeSerializer(serializers.ModelSerializer):
@@ -338,13 +338,20 @@ class CashWithdrawalSerializer(serializers.ModelSerializer):
         return None
 
 
+class ExpenseAttachmentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ExpenseAttachment
+        fields = ['id', 'file', 'uploaded_on']
+
+
 class ExpenseSerializer(serializers.ModelSerializer):
     recorded_by_name = serializers.SerializerMethodField()
     payment_method_name = serializers.CharField(source='payment_method.name', read_only=True)
+    attachments = ExpenseAttachmentSerializer(many=True, read_only=True)
 
     class Meta:
         model = Expense
-        fields = ['id', 'description', 'amount', 'payment_method', 'payment_method_name', 'recorded_by', 'recorded_by_name', 'date', 'created_on']
+        fields = ['id', 'description', 'amount', 'payment_method', 'payment_method_name', 'recorded_by', 'recorded_by_name', 'date', 'created_on', 'attachments']
         read_only_fields = ['recorded_by']
 
     def get_recorded_by_name(self, obj):

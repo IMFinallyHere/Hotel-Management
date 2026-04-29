@@ -9,8 +9,8 @@ from django.db.models import Q, Count
 from django.db.models import ProtectedError
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, Group, CustomerGroup, RoomsPriceChart, Reservation, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, RoomStatusLog, PaymentMethod
-from .serializers import RoomSerializer, RoomTypeSerializer, CountryCodeSerializer, CustomerSerializer, ConfigurationSerializer, CheckinSerializer, GroupCustomerSerializer, RoomsPriceChartSerializer, StayLogSerializer, StayLogUpdateSerializer, ReservationSerializer, ReservationReminderSerializer, AmenitySerializer, StayLogAmenitySerializer, ActiveStayLogSerializer, RoomNCRequestSerializer, PaymentSerializer, CashWithdrawalSerializer, ExpenseSerializer, ExtendStaySerializer, GraceSerializer, ShiftRoomSerializer, RoomStatusLogSerializer, PaymentMethodSerializer
+from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, Group, CustomerGroup, RoomsPriceChart, Reservation, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, ExpenseAttachment, RoomStatusLog, PaymentMethod
+from .serializers import RoomSerializer, RoomTypeSerializer, CountryCodeSerializer, CustomerSerializer, ConfigurationSerializer, CheckinSerializer, GroupCustomerSerializer, RoomsPriceChartSerializer, StayLogSerializer, StayLogUpdateSerializer, ReservationSerializer, ReservationReminderSerializer, AmenitySerializer, StayLogAmenitySerializer, ActiveStayLogSerializer, RoomNCRequestSerializer, PaymentSerializer, CashWithdrawalSerializer, ExpenseSerializer, ExpenseAttachmentSerializer, ExtendStaySerializer, GraceSerializer, ShiftRoomSerializer, RoomStatusLogSerializer, PaymentMethodSerializer
 from .permissions import report_permission, HasModelPermission
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.permissions import DjangoModelPermissions
@@ -1349,6 +1349,31 @@ class ExpenseDetail(generics.RetrieveUpdateDestroyAPIView):
     queryset = Expense.objects.all()
     serializer_class = ExpenseSerializer
     permission_classes = [IsAuthenticated]
+
+
+class ExpenseAttachmentCreate(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        expense = get_object_or_404(Expense, pk=pk)
+        files = request.FILES.getlist('files')
+        if not files:
+            return Response({'error': 'No files provided.'}, status=400)
+        created = []
+        for f in files:
+            att = ExpenseAttachment.objects.create(expense=expense, file=f)
+            created.append(ExpenseAttachmentSerializer(att, context={'request': request}).data)
+        return Response(created, status=201)
+
+
+class ExpenseAttachmentDelete(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, pk):
+        att = get_object_or_404(ExpenseAttachment, pk=pk)
+        att.file.delete(save=False)
+        att.delete()
+        return Response(status=204)
 
 
 # -----------  Finance report views  -----------

@@ -1,16 +1,20 @@
 import { useState } from 'react';
-import { Table, Button, Badge, Group, Text, Modal, NumberInput, TextInput, Select, Stack } from '@mantine/core';
+import {
+  Table, Button, Badge, Group, Text, Modal, NumberInput, TextInput,
+  Select, Stack, FileInput, ActionIcon, Anchor, Tooltip,
+} from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
 import { useForm } from '@mantine/form';
 import { useDisclosure } from '@mantine/hooks';
 import { modals } from '@mantine/modals';
-import { IconPlus } from '@tabler/icons-react';
+import { IconPlus, IconUpload, IconTrash, IconPaperclip, IconEye } from '@tabler/icons-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import api from '../api/client';
 import { QUERY_KEYS, QUERY_KEYS_OPS, fetchExpenses, fetchPaymentMethods } from '../api/queries';
 import { notifySuccess, notifyError } from '../api/notify';
 import { parseApiError } from '../api/errorUtils';
+import { compressImage } from '../utils/imageUtils';
 import usePermissions from '../hooks/usePermissions';
 
 export default function Expenses() {
@@ -19,9 +23,12 @@ export default function Expenses() {
   const canAdd    = permissions.add_expense    || permissions.is_superuser;
   const canChange = permissions.change_expense || permissions.is_superuser;
   const canDelete = permissions.delete_expense || permissions.is_superuser;
+
   const [dateFilter, setDateFilter] = useState(new Date());
   const [opened, { open, close }] = useDisclosure(false);
   const [editing, setEditing] = useState(null);
+  const [newFiles, setNewFiles] = useState([]);
+  const [savingFiles, setSavingFiles] = useState(false);
 
   const dateStr = dayjs(dateFilter).format('YYYY-MM-DD');
   const queryParams = { date: dateStr };
@@ -34,13 +41,10 @@ export default function Expenses() {
   const pmOptions = paymentMethods.filter(p => p.is_active).map(p => ({ value: String(p.id), label: p.name }));
   const pmMap = Object.fromEntries(paymentMethods.map(p => [p.id, p.name]));
 
+  const today = new Date();
+
   const form = useForm({
-    initialValues: {
-      description: '',
-      amount: 0,
-      payment_method: null,
-      date: new Date(),
-    },
+    initialValues: { description: '', amount: 0, payment_method: null, date: today },
     validate: {
       description: (v) => v.trim() ? null : 'Required',
       amount: (v) => v > 0 ? null : 'Amount must be greater than 0',
@@ -50,12 +54,14 @@ export default function Expenses() {
 
   const openAdd = () => {
     setEditing(null);
-    form.setValues({ description: '', amount: 0, payment_method: null, date: new Date() });
+    setNewFiles([]);
+    form.setValues({ description: '', amount: 0, payment_method: null, date: today });
     open();
   };
 
   const openEdit = (record) => {
     setEditing(record);
+    setNewFiles([]);
     form.setValues({
       description: record.description,
       amount: Number(record.amount),
@@ -65,23 +71,52 @@ export default function Expenses() {
     open();
   };
 
+  const uploadAttachments = async (expenseId, files) => {
+    if (!files.length) return;
+    const fd = new FormData();
+    for (const file of files) {
+      const processed = file.type.startsWith('image/')
+        ? await compressImage(file)
+        : file;
+      fd.append('files', processed);
+    }
+    await api.post(`/v1/expenses/${expenseId}/attachments/`, fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  };
+
   const saveMutation = useMutation({
-    mutationFn: (values) => {
+    mutationFn: async (values) => {
       const payload = {
         ...values,
         payment_method: Number(values.payment_method),
         date: dayjs(values.date).format('YYYY-MM-DD'),
       };
-      return editing
-        ? api.put(`/v1/expenses/${editing.id}/`, payload)
-        : api.post('/v1/expenses/', payload);
+      const res = editing
+        ? await api.put(`/v1/expenses/${editing.id}/`, payload)
+        : await api.post('/v1/expenses/', payload);
+      return res.data;
     },
-    onSuccess: () => {
+    onSuccess: async (data) => {
+      setSavingFiles(true);
+      try {
+        await uploadAttachments(data.id, newFiles);
+      } catch {
+        notifyError('Expense saved but some attachments failed — try re-uploading.');
+      } finally {
+        setSavingFiles(false);
+      }
       qc.invalidateQueries({ queryKey: ['expenses'] });
       close();
       notifySuccess('Saved.');
     },
     onError: (e) => notifyError(parseApiError(e, 'Failed to save.')),
+  });
+
+  const deleteAttachmentMutation = useMutation({
+    mutationFn: (attId) => api.delete(`/v1/expense-attachments/${attId}/`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['expenses'] }),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to delete attachment.')),
   });
 
   const deleteMutation = useMutation({
@@ -115,6 +150,26 @@ export default function Expenses() {
       </Table.Td>
       <Table.Td>{exp.recorded_by_name ?? '—'}</Table.Td>
       <Table.Td>
+        {exp.attachments?.length > 0 ? (
+          <Group gap={4} wrap="wrap">
+            {exp.attachments.map((att, i) => (
+              <Tooltip key={att.id} label={att.file.split('/').pop()}>
+                <Anchor href={att.file} target="_blank" rel="noopener noreferrer">
+                  <ActionIcon size="sm" variant="light" color="blue">
+                    <IconEye size={13} />
+                  </ActionIcon>
+                </Anchor>
+              </Tooltip>
+            ))}
+            <Badge size="xs" variant="light" color="gray" leftSection={<IconPaperclip size={10} />}>
+              {exp.attachments.length}
+            </Badge>
+          </Group>
+        ) : (
+          <Text size="xs" c="dimmed">—</Text>
+        )}
+      </Table.Td>
+      <Table.Td>
         <Group gap="xs">
           {canChange && <Button size="xs" variant="light" onClick={() => openEdit(exp)}>Edit</Button>}
           {canDelete && <Button size="xs" color="red" variant="light" onClick={() => handleDelete(exp.id)}>Delete</Button>}
@@ -127,12 +182,7 @@ export default function Expenses() {
     <>
       <Group mb="md" justify="space-between" wrap="wrap">
         <Group wrap="wrap">
-          <DatePickerInput
-            label="Date"
-            value={dateFilter}
-            onChange={setDateFilter}
-            w={180}
-          />
+          <DatePickerInput label="Date" value={dateFilter} onChange={setDateFilter} w={180} />
           {expenses.length > 0 && (
             <Text size="sm" c="dimmed" mt="xl">Total: <strong>₹{totalForDay}</strong></Text>
           )}
@@ -144,26 +194,27 @@ export default function Expenses() {
         )}
       </Group>
 
-      <Table.ScrollContainer minWidth={600}>
-      <Table striped highlightOnHover withTableBorder>
-        <Table.Thead>
-          <Table.Tr>
-            <Table.Th>Date</Table.Th>
-            <Table.Th>Description</Table.Th>
-            <Table.Th>Amount</Table.Th>
-            <Table.Th>Type</Table.Th>
-            <Table.Th>Recorded By</Table.Th>
-            <Table.Th>Actions</Table.Th>
-          </Table.Tr>
-        </Table.Thead>
-        <Table.Tbody>
-          {isLoading ? (
-            <Table.Tr><Table.Td colSpan={6} ta="center">Loading...</Table.Td></Table.Tr>
-          ) : rows.length === 0 ? (
-            <Table.Tr><Table.Td colSpan={6} ta="center">No expenses for this date.</Table.Td></Table.Tr>
-          ) : rows}
-        </Table.Tbody>
-      </Table>
+      <Table.ScrollContainer minWidth={700}>
+        <Table striped highlightOnHover withTableBorder>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>Date</Table.Th>
+              <Table.Th>Description</Table.Th>
+              <Table.Th>Amount</Table.Th>
+              <Table.Th>Type</Table.Th>
+              <Table.Th>Recorded By</Table.Th>
+              <Table.Th>Attachments</Table.Th>
+              <Table.Th>Actions</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {isLoading ? (
+              <Table.Tr><Table.Td colSpan={7} ta="center">Loading...</Table.Td></Table.Tr>
+            ) : rows.length === 0 ? (
+              <Table.Tr><Table.Td colSpan={7} ta="center">No expenses for this date.</Table.Td></Table.Tr>
+            ) : rows}
+          </Table.Tbody>
+        </Table>
       </Table.ScrollContainer>
 
       <Modal opened={opened} onClose={close} title={editing ? 'Edit Expense' : 'Add Expense'} size={{ base: '95%', sm: 'lg' }}>
@@ -171,20 +222,67 @@ export default function Expenses() {
           <Stack gap="sm">
             <TextInput label="Description" {...form.getInputProps('description')} required />
             <NumberInput label="Amount (₹)" min={1} {...form.getInputProps('amount')} required />
-            <Select
-              label="Payment Method"
-              data={pmOptions}
-              {...form.getInputProps('payment_method')}
-              required
-            />
+            <Select label="Payment Method" data={pmOptions} {...form.getInputProps('payment_method')} required />
             <DatePickerInput
               label="Date"
+              minDate={editing ? undefined : today}
+              maxDate={today}
               {...form.getInputProps('date')}
               required
             />
+
+            {/* Existing attachments (edit mode) */}
+            {editing?.attachments?.length > 0 && (
+              <div>
+                <Text size="sm" fw={500} mb={4}>Existing Attachments</Text>
+                <Stack gap={4}>
+                  {editing.attachments.map((att) => (
+                    <Group key={att.id} gap="xs">
+                      <Anchor href={att.file} target="_blank" size="sm" rel="noopener noreferrer">
+                        <Group gap={4}>
+                          <IconEye size={13} />
+                          {att.file.split('/').pop()}
+                        </Group>
+                      </Anchor>
+                      <ActionIcon
+                        size="xs" color="red" variant="subtle"
+                        loading={deleteAttachmentMutation.isPending}
+                        onClick={() => {
+                          deleteAttachmentMutation.mutate(att.id);
+                          setEditing(prev => ({
+                            ...prev,
+                            attachments: prev.attachments.filter(a => a.id !== att.id),
+                          }));
+                        }}
+                      >
+                        <IconTrash size={11} />
+                      </ActionIcon>
+                    </Group>
+                  ))}
+                </Stack>
+              </div>
+            )}
+
+            {/* New attachments */}
+            <FileInput
+              label={editing ? 'Add More Attachments' : 'Attachments'}
+              placeholder="Images or PDFs"
+              leftSection={<IconUpload size={14} />}
+              accept=".pdf,.jpg,.jpeg,.png"
+              multiple
+              value={newFiles}
+              onChange={setNewFiles}
+              clearable
+            />
+            {newFiles.length > 0 && (
+              <Text size="xs" c="dimmed">
+                {newFiles.map(f => f.name).join(' • ')}
+              </Text>
+            )}
+
             <Group justify="flex-end">
               <Button variant="default" onClick={close}>Cancel</Button>
-              <Button type="submit" loading={saveMutation.isPending}>Save</Button>
+              <Button type="submit" loading={saveMutation.isPending || savingFiles}>Save</Button>
             </Group>
           </Stack>
         </form>

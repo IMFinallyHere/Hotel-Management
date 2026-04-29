@@ -1,19 +1,13 @@
 import { useState } from 'react';
 import { Table, Button, Group, Text } from '@mantine/core';
-import { DatePickerInput } from '@mantine/dates';
-import { IconPlus } from '@tabler/icons-react';
 import { useDisclosure } from '@mantine/hooks';
 import { modals } from '@mantine/modals';
-import { useForm } from '@mantine/form';
-import { Modal, NumberInput } from '@mantine/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import dayjs from 'dayjs';
 import api from '../../api/client';
 import { QUERY_KEYS } from '../../api/queries';
 import { notifySuccess, notifyError } from '../../api/notify';
 import { parseApiError } from '../../api/errorUtils';
 import { CustomerList } from '../../components/CustomerTable';
-import CustomerSelectWithAdd from '../../components/CustomerSelectWithAdd';
 import ReminderPopover from './ReminderPopover';
 import ConvertCheckinModal from './ConvertCheckinModal';
 import usePermissions from '../../hooks/usePermissions';
@@ -22,18 +16,8 @@ export default function ReservationsTab({ room, reservations, isOccupied, config
   const qc = useQueryClient();
   const { permissions } = usePermissions();
   const canViewReminders = permissions.view_reservationreminder || permissions.is_superuser;
-  const [opened, { open, close }] = useDisclosure(false);
-  const [loading, setLoading] = useState(false);
   const [convertReservation, setConvertReservation] = useState(null);
   const [convertOpened, { open: openConvert, close: closeConvert }] = useDisclosure(false);
-
-  const form = useForm({
-    initialValues: { customers: [], dates: [null, null], price: 0 },
-    validate: {
-      customers: (v) => v.length > 0 ? null : 'Select at least one customer.',
-      dates: (v) => (v && v[0] && v[1]) ? null : 'Select dates.',
-    },
-  });
 
   const deleteMutation = useMutation({
     mutationFn: (id) => api.delete(`/v1/reservation/${id}/`),
@@ -58,28 +42,6 @@ export default function ReservationsTab({ room, reservations, isOccupied, config
     openConvert();
   };
 
-  const handleAdd = async (values) => {
-    setLoading(true);
-    try {
-      const { data: groupData } = await api.post('/v1/group/customers/', { customers: values.customers.map(Number) });
-      await api.post('/v1/reservations/', {
-        room: room.id,
-        group: groupData.group_id,
-        check_in_date: dayjs(values.dates[0]).format('YYYY-MM-DD'),
-        check_out_date: dayjs(values.dates[1]).format('YYYY-MM-DD'),
-        price: values.price ?? 0,
-      });
-      qc.invalidateQueries(QUERY_KEYS.roomReservations(room.id));
-      close();
-      form.reset();
-      notifySuccess('Reservation added.');
-    } catch (e) {
-      notifyError(parseApiError(e, 'Failed to add reservation.'));
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const rows = reservations.map((res) => (
     <Table.Tr key={res.id}>
       <Table.Td>{res.check_in_date}</Table.Td>
@@ -100,12 +62,6 @@ export default function ReservationsTab({ room, reservations, isOccupied, config
 
   return (
     <>
-      <Group mb="md">
-        <Button leftSection={<IconPlus size={16} />} onClick={() => { form.reset(); open(); }}>
-          Add Reservation
-        </Button>
-      </Group>
-
       <Table striped highlightOnHover withTableBorder>
         <Table.Thead>
           <Table.Tr>
@@ -122,33 +78,6 @@ export default function ReservationsTab({ room, reservations, isOccupied, config
           ) : rows}
         </Table.Tbody>
       </Table>
-
-      <Modal opened={opened} onClose={close} title="Add Reservation">
-        <form onSubmit={form.onSubmit(handleAdd)}>
-          <CustomerSelectWithAdd
-            label="Guests"
-            value={form.values.customers}
-            onChange={(val) => form.setFieldValue('customers', val)}
-            error={form.errors.customers}
-            required
-            simpleAdd
-          />
-          <DatePickerInput
-            type="range"
-            label="Date Range"
-            minDate={isOccupied ? dayjs().add(1, 'day').toDate() : new Date()}
-            {...form.getInputProps('dates')}
-            mt="sm"
-            mb="sm"
-            required
-          />
-          <NumberInput label="Price (₹, optional)" min={0} {...form.getInputProps('price')} mb="md" />
-          <Group justify="flex-end">
-            <Button variant="default" onClick={close}>Cancel</Button>
-            <Button type="submit" loading={loading}>Add</Button>
-          </Group>
-        </form>
-      </Modal>
 
       {convertReservation && (
         <ConvertCheckinModal

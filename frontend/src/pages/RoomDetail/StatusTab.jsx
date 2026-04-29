@@ -26,11 +26,18 @@ import { notifySuccess, notifyError } from '../../api/notify';
 import { parseApiError } from '../../api/errorUtils';
 import { parseConfigs, isLogOvertime, computeOvertimeFee, computeGst } from '../../utils/configUtils';
 
-function DescRow({ label, value }) {
+function DescRow({ label, value, highlight }) {
   return (
-    <Group justify="space-between" py={4} style={{ borderBottom: '1px solid var(--mantine-color-gray-2)' }}>
-      <Text size="sm" c="dimmed">{label}</Text>
-      <Text size="sm" fw={500}>{value}</Text>
+    <Group justify="space-between" py={4}
+      style={{
+        borderBottom: '1px solid var(--mantine-color-gray-2)',
+        background: highlight ? 'var(--mantine-color-orange-0)' : undefined,
+        borderRadius: highlight ? 4 : undefined,
+        paddingLeft: highlight ? 6 : undefined,
+        paddingRight: highlight ? 6 : undefined,
+      }}>
+      <Text size="sm" c={highlight ? 'orange.7' : 'dimmed'} fw={highlight ? 600 : undefined}>{label}</Text>
+      <Text size="sm" fw={highlight ? 700 : 500} c={highlight ? 'orange.7' : undefined}>{value}</Text>
     </Group>
   );
 }
@@ -371,26 +378,35 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
     return (
       <Stack gap="sm">
         <Stack gap={0} maw={400}>
-          <DescRow label="Check-In" value={dayjs(activeLog.check_in).format('DD MMM YYYY, hh:mm A')} />
-          <DescRow label="Price" value={`₹${activeLog.price}`} />
-          <DescRow label="Extra Beds" value={activeLog.extra_bed} />
-          {activeLog.extra_bed > 0 && (
-            <DescRow label="Price/Extra Bed" value={`₹${activeLog.extra_per_bed_price}`} />
-          )}
-          <DescRow label="Nights" value={nights} />
-          {amenityCost > 0 && (
-            <DescRow label="Amenities" value={`₹${amenityCost}`} />
-          )}
-          <DescRow label="Expected Checkout"
-            value={activeLog.expected_checkout
-              ? dayjs(activeLog.expected_checkout).format('DD MMM YYYY, hh:mm A') : '—'} />
-          {overtime && (
-            <DescRow label="Overtime Fee" value={`₹${overtimeFee}`} />
-          )}
-          {gstAmount > 0 && (
-            <DescRow label={`GST (${configMap['gst_percent']}%)${activeLog.gst_inclusive ? ' (incl.)' : ''}`} value={`₹${gstAmount}`} />
-          )}
-          <DescRow label="Total Cost" value={`₹${totalCost}`} />
+          {(() => {
+            const totalPaid = (activeLog.payments || []).reduce((s, p) => s + Number(p.amount), 0);
+            return (
+              <>
+                <DescRow label="Check-In" value={dayjs(activeLog.check_in).format('DD MMM YYYY, hh:mm A')} />
+                <DescRow label="Expected Checkout"
+                  value={activeLog.expected_checkout
+                    ? dayjs(activeLog.expected_checkout).format('DD MMM YYYY, hh:mm A') : '—'} />
+                <DescRow label="Nights" value={nights} />
+                <DescRow label="Extra Beds" value={activeLog.extra_bed} />
+                {activeLog.extra_bed > 0 && (
+                  <DescRow label="Price/Extra Bed" value={`₹${activeLog.extra_per_bed_price}`} />
+                )}
+                <DescRow label="Price" value={`₹${activeLog.price}`} />
+                {amenityCost > 0 && (
+                  <DescRow label="Amenities" value={`₹${amenityCost}`} />
+                )}
+                {overtime && (
+                  <DescRow label="Overtime Fee" value={`₹${overtimeFee}`} />
+                )}
+                {gstAmount > 0 && (
+                  <DescRow label={`GST (${configMap['gst_percent']}%)${activeLog.gst_inclusive ? ' (incl.)' : ''}`} value={`₹${gstAmount}`} />
+                )}
+                <DescRow label="Total Cost" value={`₹${totalCost}`} />
+                <DescRow label="Advance Paid" value={`₹${totalPaid}`} />
+                <DescRow label="Balance Due" value={`₹${Math.max(0, totalCost - totalPaid)}`} highlight={totalCost - totalPaid > 0} />
+              </>
+            );
+          })()}
         </Stack>
         {activeLog.is_early_checkin && (
           <Badge color="cyan" variant="light" size="sm">Early Check-In</Badge>
@@ -649,7 +665,7 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
   }
 
   // ── Inline check-in form ──
-  const ciNights = checkinCheckoutDate ? dayjs(checkinCheckoutDate).diff(dayjs().startOf('day'), 'day') : 0;
+  const ciNights = checkinCheckoutDate ? Math.max(1, dayjs(checkinCheckoutDate).diff(dayjs().startOf('day'), 'day')) : 0;
   const ciMaxAllowed = room.beds + checkinExtraBed;
   const ciGuestExceeded = guestRows.length > ciMaxAllowed;
   const gstPercent = configMap['gst_percent'] ?? '0';
@@ -688,7 +704,18 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
                 type="range"
                 label="Check-in → Checkout"
                 value={[new Date(), checkinCheckoutDate]}
-                onChange={([, end]) => { setCheckinCheckoutDate(end ?? null); setCheckinDateError(null); }}
+                onChange={([, end]) => {
+                  let finalEnd = end ?? null;
+                  if (finalEnd && dayjs(finalEnd).isSame(dayjs(), 'day')) {
+                    const [h, m] = defaultCheckoutTime.split(':').map(Number);
+                    const now = dayjs();
+                    if (now.hour() > h || (now.hour() === h && now.minute() >= m)) {
+                      finalEnd = dayjs().add(1, 'day').toDate();
+                    }
+                  }
+                  setCheckinCheckoutDate(finalEnd);
+                  setCheckinDateError(null);
+                }}
                 minDate={new Date()}
                 allowSingleDateInRange
                 required

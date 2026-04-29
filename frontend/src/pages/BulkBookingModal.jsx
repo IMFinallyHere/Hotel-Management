@@ -47,9 +47,11 @@ function createEmptyGuest(countryCodeId = null) {
   };
 }
 
-function createRoomConfig(room, indiaId) {
+function createRoomConfig(room, indiaId, priceChart = []) {
+  const today = new Date().toISOString().slice(0, 10);
+  const chartPrice = priceChart.find(e => e.room === room.id && e.date === today)?.price;
   return {
-    price: 0,
+    price: Number(chartPrice ?? room.price ?? 0),
     extraBed: 0,
     extraPerBedPrice: 0,
     isAc: room.is_ac,
@@ -232,14 +234,14 @@ export default function BulkBooking() {
       const next = {};
       selectedRoomIds.forEach(id => {
         const room = rooms.find(r => r.id === id);
-        next[id] = prev[id] ?? (room ? createRoomConfig(room, indiaId) : undefined);
+        next[id] = prev[id] ?? (room ? createRoomConfig(room, indiaId, priceChart) : undefined);
       });
       return next;
     });
   }, [selectedRoomIds, indiaId, rooms]);
 
   const effectiveCheckIn = ciDate ? dayjs(ciDate) : dayjs();
-  const nights = checkoutDate ? dayjs(checkoutDate).diff(effectiveCheckIn.startOf('day'), 'day') : 0;
+  const nights = checkoutDate ? Math.max(1, dayjs(checkoutDate).diff(effectiveCheckIn.startOf('day'), 'day')) : 0;
   const selectedRooms = rooms.filter(r => selectedRoomIds.has(r.id));
 
   // ── Billing totals ──
@@ -556,12 +558,21 @@ export default function BulkBooking() {
           label="Check-in → Check-out"
           value={[ciDate, checkoutDate]}
           onChange={([start, end]) => {
+            let finalEnd = end ?? null;
+            if (start && finalEnd && dayjs(start).isSame(dayjs(finalEnd), 'day')) {
+              const [h, m] = defaultCheckoutTime.split(':').map(Number);
+              const now = dayjs();
+              if (now.hour() > h || (now.hour() === h && now.minute() >= m)) {
+                finalEnd = dayjs(start).add(1, 'day').toDate();
+              }
+            }
             setCiDate(start ?? null);
-            setCheckoutDate(end ?? null);
+            setCheckoutDate(finalEnd);
             setSelectedRoomIds(new Set());
             setSharedGuest(createEmptyGuest(indiaId));
           }}
           minDate={new Date()}
+          allowSingleDateInRange
           required
           size="sm"
         />
@@ -726,7 +737,7 @@ export default function BulkBooking() {
                   {/* Stay config */}
                   <Grid gutter="xs" mb="sm">
                     <Grid.Col span={{ base: 6, sm: 3 }}>
-                      <NumberInput size="xs" label="Price (₹, 0=auto)" min={0}
+                      <NumberInput size="xs" label="Price (₹)" min={0}
                         value={config.price} onChange={(v) => updateConfig(room.id, 'price', v)} />
                     </Grid.Col>
                     <Grid.Col span={{ base: 6, sm: 3 }}>
@@ -951,7 +962,7 @@ export default function BulkBooking() {
   // ── Navigation ──
   const handleNext = () => {
     if (step === 0) {
-      if (!ciDate || !checkoutDate || selectedRoomIds.size < 2) return;
+      if (!ciDate || !checkoutDate || selectedRoomIds.size < 1) return;
       setStep(1);
     } else if (step === 1) {
       if (validateStep2()) setStep(2);
@@ -978,7 +989,7 @@ export default function BulkBooking() {
       </Group>
 
       <Stepper active={step} size="sm">
-        <Stepper.Step label="Select Rooms" description={selectedRoomIds.size > 0 ? `${selectedRoomIds.size} selected` : undefined} />
+        <Stepper.Step label="Select Rooms" description={selectedRoomIds.size > 0 ? `${selectedRoomIds.size} room${selectedRoomIds.size !== 1 ? 's' : ''} selected` : undefined} />
         <Stepper.Step label="Configure" description="Guests & pricing" />
         <Stepper.Step label="Confirm" description={bookingType === 'checkin' ? 'Check-in' : 'Reserve'} />
       </Stepper>
@@ -997,7 +1008,7 @@ export default function BulkBooking() {
           {step < 2 ? (
             <Button
               onClick={handleNext}
-              disabled={step === 0 && (!ciDate || !checkoutDate || selectedRoomIds.size < 2)}
+              disabled={step === 0 && (!ciDate || !checkoutDate || selectedRoomIds.size < 1)}
             >
               Next
             </Button>

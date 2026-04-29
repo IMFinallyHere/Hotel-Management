@@ -92,6 +92,16 @@ export default function RoomDetail() {
     onError: (e) => notifyError(parseApiError(e, 'Pay & checkout failed.')),
   });
 
+  const markAvailableMutation = useMutation({
+    mutationFn: () => api.patch(`/v1/room/${room.id}/`, { status: 'available' }),
+    onSuccess: () => {
+      qc.invalidateQueries(QUERY_KEYS.room(id));
+      qc.invalidateQueries(QUERY_KEYS.rooms);
+      notifySuccess('Room marked as available.');
+    },
+    onError: (e) => notifyError(parseApiError(e, 'Failed to update room status.')),
+  });
+
   if (roomLoading) {
     return <Center h={200}><Loader size="lg" /></Center>;
   }
@@ -111,6 +121,8 @@ export default function RoomDetail() {
   let statusColor = 'teal';
   let statusLabel = 'Available';
   if (activeLog) { statusColor = 'red'; statusLabel = 'Occupied'; }
+  else if (room.status === 'cleaning') { statusColor = 'violet'; statusLabel = 'Cleaning'; }
+  else if (room.status === 'out_of_order') { statusColor = 'dark'; statusLabel = 'Out of Order'; }
   else if (nextReservation) { statusColor = 'orange'; statusLabel = 'Reserved'; }
 
   const handleCheckout = () => {
@@ -171,6 +183,17 @@ export default function RoomDetail() {
             : <Badge color="gray" variant="outline" size="sm" ml="xs">Non-AC</Badge>
           }
         </div>
+        {!activeLog && room.status === 'cleaning' && (
+          <Button
+            size="xs"
+            color="violet"
+            variant="light"
+            loading={markAvailableMutation.isPending}
+            onClick={() => markAvailableMutation.mutate()}
+          >
+            Mark Available
+          </Button>
+        )}
         {activeLog && (
           <Group gap="xs" style={{ marginLeft: 'clamp(16px, 8vw, 130px)' }}>
             <Button variant="outline" color="blue" onClick={handleOpenShift}>
