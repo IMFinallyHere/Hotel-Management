@@ -106,6 +106,9 @@ class RoomStayLogs(models.Model):
     shift_reason = models.TextField(null=True, blank=True)
     is_ac = models.BooleanField(null=True, blank=True)
     checked_in_by = models.ForeignKey(User, models.SET_NULL, null=True, blank=True, related_name='checkins')
+    male_count = models.PositiveSmallIntegerField(default=0)
+    female_count = models.PositiveSmallIntegerField(default=0)
+    child_count = models.PositiveSmallIntegerField(default=0)
 
 
 class Configurations(models.Model):

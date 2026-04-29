@@ -65,13 +65,16 @@ class RoomsPriceChartSerializer(serializers.ModelSerializer):
 class CheckinSerializer(serializers.ModelSerializer):
     class Meta:
         model = RoomStayLogs
-        fields = ['room', 'price', 'group', 'extra_bed', 'extra_per_bed_price', 'expected_checkout', 'gst_applied', 'gst_inclusive', 'is_ac']
+        fields = ['room', 'price', 'group', 'extra_bed', 'extra_per_bed_price', 'expected_checkout', 'gst_applied', 'gst_inclusive', 'is_ac', 'male_count', 'female_count', 'child_count']
         extra_kwargs = {
             'price': {'required': False, 'default': 0},
             'expected_checkout': {'required': False},
             'gst_applied': {'required': False, 'default': False},
             'gst_inclusive': {'required': False, 'default': False},
             'is_ac': {'required': False, 'default': None},
+            'male_count': {'required': False, 'default': 0},
+            'female_count': {'required': False, 'default': 0},
+            'child_count': {'required': False, 'default': 0},
         }
 
     @staticmethod
@@ -118,7 +121,7 @@ class StayLogSerializer(serializers.ModelSerializer):
         model = RoomStayLogs
         fields = ['id', 'room', 'group', 'check_in', 'check_out', 'price', 'extra_bed', 'extra_per_bed_price', 'is_nc',
                   'expected_checkout', 'overtime_rate', 'grace_until', 'is_early_checkin', 'gst_applied', 'gst_inclusive',
-                  'shifted_from', 'shift_reason', 'is_ac', 'checked_in_by_name']
+                  'shifted_from', 'shift_reason', 'is_ac', 'checked_in_by_name', 'male_count', 'female_count', 'child_count']
 
 
 class StayLogUpdateSerializer(serializers.ModelSerializer):

@@ -197,6 +197,9 @@ export default function BulkBooking() {
   const [roomConfigs, setRoomConfigs] = useState({});
   const [advPaymentType, setAdvPaymentType] = useState(null);
   const [advPaymentAmount, setAdvPaymentAmount] = useState(0);
+  const [maleCount, setMaleCount] = useState(0);
+  const [femaleCount, setFemaleCount] = useState(0);
+  const [childCount, setChildCount] = useState(0);
   const [resAdvPaymentType, setResAdvPaymentType] = useState(null);
   const [resAdvPaymentAmount, setResAdvPaymentAmount] = useState(0);
   const [submitting, setSubmitting] = useState(false);
@@ -500,6 +503,9 @@ export default function BulkBooking() {
               expected_checkout: expectedCheckout,
               gst_applied: gstMode !== 'none', gst_inclusive: gstMode === 'inclusive',
               is_ac: config.isAc,
+              male_count: maleCount,
+              female_count: femaleCount,
+              child_count: childCount,
             });
             if (advPaymentAmount > 0 && ci.log_id) {
               await api.post(`/v1/stay-logs/${ci.log_id}/payments/`, {
@@ -542,6 +548,7 @@ export default function BulkBooking() {
     setRoomConfigs({});
     setSharedGuest(createEmptyGuest(indiaId));
     setAdvPaymentType('cash'); setAdvPaymentAmount(0);
+    setMaleCount(0); setFemaleCount(0); setChildCount(0);
     setResAdvPaymentType('cash'); setResAdvPaymentAmount(0);
     setResults(null);
     navigate('/rooms');
@@ -852,6 +859,12 @@ export default function BulkBooking() {
 
               {bookingType === 'checkin' && (
                 <>
+                  <Divider mt="xs" label="Occupants" labelPosition="left" />
+                  <Group grow>
+                    <NumberInput size="sm" label="Male" min={0} value={maleCount} onChange={setMaleCount} />
+                    <NumberInput size="sm" label="Female" min={0} value={femaleCount} onChange={setFemaleCount} />
+                    <NumberInput size="sm" label="Children" min={0} value={childCount} onChange={setChildCount} />
+                  </Group>
                   <Divider mt="xs" label="Advance Payment" labelPosition="left" />
                   <Select size="sm" label="Payment Method"
                     data={paymentMethods.filter(p => p.is_active).map(p => ({ value: String(p.id), label: p.name }))}

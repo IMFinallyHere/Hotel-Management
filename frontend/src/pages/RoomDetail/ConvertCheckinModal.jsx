@@ -61,6 +61,9 @@ export default function ConvertCheckinModal({ opened, onClose, reservation, room
   const [sharedPincode, setSharedPincode] = useState('');
   const [advPaymentType, setAdvPaymentType] = useState(null);
   const [advPaymentAmount, setAdvPaymentAmount] = useState(0);
+  const [maleCount, setMaleCount] = useState(0);
+  const [femaleCount, setFemaleCount] = useState(0);
+  const [childCount, setChildCount] = useState(0);
   const [checkoutDateError, setCheckoutDateError] = useState(null);
   const [submitError, setSubmitError] = useState(null);
   const [submitLoading, setSubmitLoading] = useState(false);
@@ -77,6 +80,9 @@ export default function ConvertCheckinModal({ opened, onClose, reservation, room
     setExtraPerBedPrice(0);
     setAdvPaymentAmount(0);
     setAdvPaymentType(null);
+    setMaleCount(0);
+    setFemaleCount(0);
+    setChildCount(0);
     setSubmitError(null);
     setCheckoutDateError(null);
   }, [opened, reservation, indiaId]);
@@ -247,6 +253,9 @@ export default function ConvertCheckinModal({ opened, onClose, reservation, room
         gst_applied: gstMode !== 'none',
         gst_inclusive: gstMode === 'inclusive',
         is_ac: isAc,
+        male_count: maleCount,
+        female_count: femaleCount,
+        child_count: childCount,
       });
 
       if (advPaymentAmount > 0 && checkinData.log_id) {
@@ -353,6 +362,20 @@ export default function ConvertCheckinModal({ opened, onClose, reservation, room
                     onChange={(v) => setIsAc(v === 'yes')}
                     data={[{ value: 'no', label: 'Non-AC' }, { value: 'yes', label: 'AC' }]}
                   />
+                </Grid.Col>
+                <Grid.Col span={12}>
+                  <Text size="sm" fw={500} mb={6}>Occupants</Text>
+                  <Grid gutter="sm">
+                    <Grid.Col span={{ base: 12, sm: 4 }}>
+                      <NumberInput label="Male" min={0} value={maleCount} onChange={setMaleCount} />
+                    </Grid.Col>
+                    <Grid.Col span={{ base: 12, sm: 4 }}>
+                      <NumberInput label="Female" min={0} value={femaleCount} onChange={setFemaleCount} />
+                    </Grid.Col>
+                    <Grid.Col span={{ base: 12, sm: 4 }}>
+                      <NumberInput label="Children" min={0} value={childCount} onChange={setChildCount} />
+                    </Grid.Col>
+                  </Grid>
                 </Grid.Col>
               </Grid>
 

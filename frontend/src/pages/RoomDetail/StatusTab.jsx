@@ -81,6 +81,9 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
   const [sharedPincode, setSharedPincode] = useState('');
   const [advPaymentType, setAdvPaymentType] = useState(null);
   const [advPaymentAmount, setAdvPaymentAmount] = useState(0);
+  const [maleCount, setMaleCount] = useState(0);
+  const [femaleCount, setFemaleCount] = useState(0);
+  const [childCount, setChildCount] = useState(0);
   const ciDebounceTimers = useRef({});
 
   const { data: codes = [] } = useQuery({ queryKey: QUERY_KEYS.countryCodes, queryFn: fetchCountryCodes });
@@ -121,6 +124,9 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
     setSharedPincode('');
     setAdvPaymentType('cash');
     setAdvPaymentAmount(0);
+    setMaleCount(0);
+    setFemaleCount(0);
+    setChildCount(0);
   };
 
   const updateCheckinGuest = (idx, field, value) => {
@@ -293,6 +299,9 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
         gst_applied: checkinGstMode !== 'none',
         gst_inclusive: checkinGstMode === 'inclusive',
         is_ac: checkinIsAc,
+        male_count: maleCount,
+        female_count: femaleCount,
+        child_count: childCount,
       });
 
       if (advPaymentAmount > 0 && checkinData.log_id) {
@@ -404,6 +413,13 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
                 <DescRow label="Total Cost" value={`₹${totalCost}`} />
                 <DescRow label="Advance Paid" value={`₹${totalPaid}`} />
                 <DescRow label="Balance Due" value={`₹${Math.max(0, totalCost - totalPaid)}`} highlight={totalCost - totalPaid > 0} />
+                {(activeLog.male_count > 0 || activeLog.female_count > 0 || activeLog.child_count > 0) && (
+                  <DescRow label="Occupants" value={[
+                    activeLog.male_count > 0 ? `${activeLog.male_count}M` : null,
+                    activeLog.female_count > 0 ? `${activeLog.female_count}F` : null,
+                    activeLog.child_count > 0 ? `${activeLog.child_count}C` : null,
+                  ].filter(Boolean).join(' · ')} />
+                )}
               </>
             );
           })()}
@@ -745,6 +761,20 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
                 checked={checkinIsAc ?? false}
                 onChange={(e) => setCheckinIsAc(e.currentTarget.checked)}
               />
+            </Grid.Col>
+            <Grid.Col span={12}>
+              <Text size="sm" fw={500} mb={6}>Occupants</Text>
+              <Grid gutter="sm">
+                <Grid.Col span={{ base: 12, sm: 4 }}>
+                  <NumberInput label="Male" min={0} value={maleCount} onChange={setMaleCount} />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 4 }}>
+                  <NumberInput label="Female" min={0} value={femaleCount} onChange={setFemaleCount} />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 4 }}>
+                  <NumberInput label="Children" min={0} value={childCount} onChange={setChildCount} />
+                </Grid.Col>
+              </Grid>
             </Grid.Col>
           </Grid>
 
