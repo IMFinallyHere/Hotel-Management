@@ -228,3 +228,8 @@ class ExpenseAttachment(models.Model):
     expense = models.ForeignKey(Expense, models.CASCADE, related_name='attachments')
     file = models.FileField(upload_to='expense_attachments/')
     uploaded_on = models.DateTimeField(auto_now_add=True)
+
+
+class StayVehicle(models.Model):
+    stay = models.ForeignKey(RoomStayLogs, models.CASCADE, related_name='vehicles')
+    vehicle_number = models.CharField(max_length=20)

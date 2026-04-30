@@ -15,6 +15,7 @@ from .views import (RoomTypeListCreate, RoomTypeDetail, RoomListCreate, RoomDeta
                     StayLogPaymentListCreate, StayLogPaymentDetail,
                     CashWithdrawalListCreate, CashWithdrawalDetail, CashWithdrawalApprove, CashWithdrawalReject,
                     ExpenseListCreate, ExpenseDetail, ExpenseAttachmentCreate, ExpenseAttachmentDelete,
+                    StayVehicleCreate, StayVehicleDelete,
                     PLReportView, StaffSalesView, CashReconciliationView, ExpenseReportView,
                     ExtendStay, GrantGrace, ShiftRoom, GSTReportView, StayLogHistory,
                     ReservationReminderListCreate, ReservationReminderDetail)
@@ -69,6 +70,8 @@ urlpatterns = [
     path('expenses/<int:pk>/', ExpenseDetail.as_view(), name='expense-detail'),
     path('expenses/<int:pk>/attachments/', ExpenseAttachmentCreate.as_view(), name='expense-attachment-create'),
     path('expense-attachments/<int:pk>/', ExpenseAttachmentDelete.as_view(), name='expense-attachment-delete'),
+    path('stay-logs/<int:pk>/vehicles/', StayVehicleCreate.as_view(), name='stay-vehicle-create'),
+    path('vehicles/<int:pk>/', StayVehicleDelete.as_view(), name='stay-vehicle-delete'),
     path('reports/gst/', GSTReportView.as_view(), name='report-gst'),
     path('reports/revenue/', RevenueReportView.as_view(), name='report-revenue'),
     path('reports/occupancy/', OccupancyReportView.as_view(), name='report-occupancy'),

@@ -15,6 +15,7 @@ import {
   QUERY_KEYS, searchCustomers,
   fetchRooms, fetchRoomTypes, fetchActiveLogs, fetchReservations,
   fetchPriceChart, fetchConfigurations, fetchCountryCodes, fetchPaymentMethods,
+  addStayVehicle,
 } from '../api/queries';
 import { parseApiError } from '../api/errorUtils';
 import { parseConfigs } from '../utils/configUtils';
@@ -200,6 +201,8 @@ export default function BulkBooking() {
   const [maleCount, setMaleCount] = useState(0);
   const [femaleCount, setFemaleCount] = useState(0);
   const [childCount, setChildCount] = useState(0);
+  const [vehicleInputs, setVehicleInputs] = useState([]);
+  const [vehicleInputText, setVehicleInputText] = useState('');
   const [resAdvPaymentType, setResAdvPaymentType] = useState(null);
   const [resAdvPaymentAmount, setResAdvPaymentAmount] = useState(0);
   const [submitting, setSubmitting] = useState(false);
@@ -512,6 +515,9 @@ export default function BulkBooking() {
                 payment_method: Number(advPaymentType), amount: advPaymentAmount,
               }).catch(() => {});
             }
+            if (vehicleInputs.length > 0 && ci.log_id) {
+              await Promise.all(vehicleInputs.map(v => addStayVehicle(ci.log_id, v).catch(() => {})));
+            }
             roomResults.push({ roomId: room.id, status: 'success', message: 'Checked in' });
           } catch (e) {
             roomResults.push({ roomId: room.id, status: 'error', message: parseApiError(e, 'Failed') });
@@ -549,6 +555,7 @@ export default function BulkBooking() {
     setSharedGuest(createEmptyGuest(indiaId));
     setAdvPaymentType('cash'); setAdvPaymentAmount(0);
     setMaleCount(0); setFemaleCount(0); setChildCount(0);
+    setVehicleInputs([]); setVehicleInputText('');
     setResAdvPaymentType('cash'); setResAdvPaymentAmount(0);
     setResults(null);
     navigate('/rooms');
@@ -865,6 +872,39 @@ export default function BulkBooking() {
                     <NumberInput size="sm" label="Female" min={0} value={femaleCount} onChange={setFemaleCount} />
                     <NumberInput size="sm" label="Children" min={0} value={childCount} onChange={setChildCount} />
                   </Group>
+                  <Divider mt="xs" label="Vehicles" labelPosition="left" />
+                  <Group gap="xs">
+                    <TextInput
+                      size="sm"
+                      placeholder="e.g. DL 01 AB 1234"
+                      value={vehicleInputText}
+                      onChange={(e) => setVehicleInputText(e.currentTarget.value.toUpperCase())}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          const v = vehicleInputText.trim();
+                          if (v) { setVehicleInputs(prev => [...prev, v]); setVehicleInputText(''); }
+                        }
+                      }}
+                      style={{ flex: 1 }}
+                    />
+                    <Button size="sm" variant="light" onClick={() => {
+                      const v = vehicleInputText.trim();
+                      if (v) { setVehicleInputs(prev => [...prev, v]); setVehicleInputText(''); }
+                    }}>Add</Button>
+                  </Group>
+                  {vehicleInputs.length > 0 && (
+                    <Group gap="xs" wrap="wrap" mt="xs">
+                      {vehicleInputs.map((v, i) => (
+                        <Badge key={i} variant="light" size="lg" rightSection={
+                          <ActionIcon size="xs" color="red" variant="transparent"
+                            onClick={() => setVehicleInputs(prev => prev.filter((_, idx) => idx !== i))}>
+                            ×
+                          </ActionIcon>
+                        }>{v}</Badge>
+                      ))}
+                    </Group>
+                  )}
                   <Divider mt="xs" label="Advance Payment" labelPosition="left" />
                   <Select size="sm" label="Payment Method"
                     data={paymentMethods.filter(p => p.is_active).map(p => ({ value: String(p.id), label: p.name }))}

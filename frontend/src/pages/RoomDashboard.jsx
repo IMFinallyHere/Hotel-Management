@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { SimpleGrid, Card, Badge, Text, Group, TextInput, SegmentedControl, Loader, Center, Stack, Button, Modal, Select, NumberInput, Switch, ActionIcon, Popover, Divider } from '@mantine/core';
+import { SimpleGrid, Card, Badge, Text, Group, TextInput, SegmentedControl, Loader, Center, Stack, Button, Modal, Select, NumberInput, Switch, ActionIcon, Popover, Divider, ScrollArea } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { useDisclosure } from '@mantine/hooks';
 import { IconSearch, IconPlus, IconTool, IconCalendarPlus } from '@tabler/icons-react';
@@ -36,6 +36,7 @@ export default function RoomDashboard() {
   const { permissions } = usePermissions();
   const today = new Date().toISOString().slice(0, 10);
   const [search, setSearch] = useState('');
+  const [vehicleSearch, setVehicleSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [addOpened, { open: openAdd, close: closeAdd }] = useDisclosure(false);
 
@@ -100,8 +101,21 @@ export default function RoomDashboard() {
     onError: (e) => notifyError(parseApiError(e, 'Failed to update room status.')),
   });
 
+  const vehicleMatchRoomIds = vehicleSearch.trim()
+    ? new Set(
+        activeLogs
+          .filter(l => l.check_out === null &&
+            (l.vehicles || []).some(v =>
+              v.vehicle_number.toLowerCase().includes(vehicleSearch.trim().toLowerCase())
+            )
+          )
+          .map(l => l.room)
+      )
+    : null;
+
   const filteredRooms = rooms.filter(room => {
     if (search && !room.room_number.toLowerCase().includes(search.toLowerCase())) return false;
+    if (vehicleMatchRoomIds && !vehicleMatchRoomIds.has(room.id)) return false;
     if (statusFilter !== 'all' && getRoomStatus(room, occupiedIds, reservedIds, overtimeIds) !== statusFilter) return false;
     return true;
   });
@@ -110,27 +124,51 @@ export default function RoomDashboard() {
     return <Center h={200}><Loader size="lg" /></Center>;
   }
 
+  const statusCounts = {
+    all:          rooms.length,
+    available:    rooms.filter(r => !occupiedIds.has(r.id) && !reservedIds.has(r.id) && r.status === 'available').length,
+    cleaning:     rooms.filter(r => !occupiedIds.has(r.id) && r.status === 'cleaning').length,
+    out_of_order: rooms.filter(r => !occupiedIds.has(r.id) && r.status === 'out_of_order').length,
+    reserved:     [...reservedIds].filter(id => !occupiedIds.has(id) && rooms.find(r => r.id === id)?.status === 'available').length,
+    occupied:     [...occupiedIds].filter(id => !overtimeIds.has(id)).length,
+    overtime:     overtimeIds.size,
+  };
+
   return (
     <Stack gap="md">
-      <Group justify="space-between" align="flex-start">
-        <div>
-          <Text fw={600} size="xl" mb="xs">Room Dashboard</Text>
-          <Group gap="xs">
-            {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (
-              <Badge key={key} color={cfg.color} variant="light" size="lg">
-                {cfg.label}: {
-                  key === 'overtime'     ? overtimeIds.size
-                  : key === 'occupied'  ? [...occupiedIds].filter(id => !overtimeIds.has(id)).length
-                  : key === 'cleaning'  ? rooms.filter(r => !occupiedIds.has(r.id) && r.status === 'cleaning').length
-                  : key === 'out_of_order' ? rooms.filter(r => !occupiedIds.has(r.id) && r.status === 'out_of_order').length
-                  : key === 'reserved' ? [...reservedIds].filter(id => !occupiedIds.has(id) && rooms.find(r => r.id === id)?.status === 'available').length
-                  : rooms.filter(r => !occupiedIds.has(r.id) && !reservedIds.has(r.id) && r.status === 'available').length
-                }
-              </Badge>
-            ))}
-          </Group>
-        </div>
+      <Group justify="space-between" align="center">
+        <Text fw={600} size="xl">Room Dashboard</Text>
+        <Group gap="xs">
+          {(permissions.add_rooms || permissions.is_superuser) && (
+            <Button leftSection={<IconPlus size={16} />} onClick={() => { addForm.reset(); openAdd(); }}>
+              Add Room
+            </Button>
+          )}
+          {(permissions.add_roomstaylogs || permissions.is_superuser) && (
+            <Button leftSection={<IconCalendarPlus size={16} />} color="teal" onClick={() => navigate('/bulk-booking')}>
+              Bulk Booking
+            </Button>
+          )}
+        </Group>
       </Group>
+
+      <ScrollArea type="scroll" scrollbarSize={4}>
+        <SegmentedControl
+          fullWidth
+          value={statusFilter}
+          onChange={setStatusFilter}
+          style={{ minWidth: 'max-content' }}
+          data={[
+            { value: 'all',          label: `All (${statusCounts.all})` },
+            { value: 'available',    label: `Available (${statusCounts.available})` },
+            { value: 'cleaning',     label: `Cleaning (${statusCounts.cleaning})` },
+            { value: 'out_of_order', label: `Out of Order (${statusCounts.out_of_order})` },
+            { value: 'reserved',     label: `Reserved (${statusCounts.reserved})` },
+            { value: 'occupied',     label: `Occupied (${statusCounts.occupied})` },
+            { value: 'overtime',     label: `Overtime (${statusCounts.overtime})` },
+          ]}
+        />
+      </ScrollArea>
 
       <Group>
         <TextInput
@@ -140,28 +178,12 @@ export default function RoomDashboard() {
           onChange={(e) => setSearch(e.target.value)}
           w={220}
         />
-        {(permissions.add_rooms || permissions.is_superuser) && (
-          <Button leftSection={<IconPlus size={16} />} onClick={() => { addForm.reset(); openAdd(); }}>
-            Add Room
-          </Button>
-        )}
-        {(permissions.add_roomstaylogs || permissions.is_superuser) && (
-          <Button leftSection={<IconCalendarPlus size={16} />} color="teal" onClick={() => navigate('/bulk-booking')}>
-            Bulk Booking
-          </Button>
-        )}
-        <SegmentedControl
-          value={statusFilter}
-          onChange={setStatusFilter}
-          data={[
-            { value: 'all', label: 'All' },
-            { value: 'available', label: 'Available' },
-            { value: 'cleaning', label: 'Cleaning' },
-            { value: 'out_of_order', label: 'Out of Order' },
-            { value: 'reserved', label: 'Reserved' },
-            { value: 'occupied', label: 'Occupied' },
-            { value: 'overtime', label: 'Overtime' },
-          ]}
+        <TextInput
+          leftSection={<IconSearch size={16} />}
+          placeholder="Search by vehicle no."
+          value={vehicleSearch}
+          onChange={(e) => setVehicleSearch(e.target.value.toUpperCase())}
+          w={200}
         />
       </Group>
 

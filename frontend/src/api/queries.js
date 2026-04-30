@@ -95,3 +95,7 @@ export const fetchExpenseReport = (params) => api.get('/v1/finance/expenses/', {
 export const fetchStayHistory = (params) => api.get('/v1/stay-logs/history/', { params }).then(r => r.data);
 export const fetchGSTReport = (params) => api.get('/v1/reports/gst/', { params }).then(r => r.data);
 export const fetchDueReminders = () => api.get('/v1/reminders/').then(r => r.data);
+
+export const addStayVehicle = (logId, vehicleNumber) =>
+  api.post(`/v1/stay-logs/${logId}/vehicles/`, { vehicle_number: vehicleNumber }).then(r => r.data);
+export const deleteStayVehicle = (vehicleId) => api.delete(`/v1/vehicles/${vehicleId}/`);

@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Modal, Stack, Grid, Text, Button, Group, Alert, Divider,
   NumberInput, Paper, Center, Loader, Select, ActionIcon,
-  TextInput, SegmentedControl, Card,
+  TextInput, SegmentedControl, Card, Badge,
 } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
 import { IconTrash, IconUserPlus } from '@tabler/icons-react';
@@ -11,7 +11,7 @@ import dayjs from 'dayjs';
 import api from '../../api/client';
 import {
   QUERY_KEYS, fetchGroupCustomers, fetchConfigurations, fetchCountryCodes,
-  searchCustomers, fetchPaymentMethods, fetchPriceChart,
+  searchCustomers, fetchPaymentMethods, fetchPriceChart, addStayVehicle,
 } from '../../api/queries';
 import { compressImage } from '../../utils/imageUtils';
 import { parseApiError } from '../../api/errorUtils';
@@ -64,6 +64,8 @@ export default function ConvertCheckinModal({ opened, onClose, reservation, room
   const [maleCount, setMaleCount] = useState(0);
   const [femaleCount, setFemaleCount] = useState(0);
   const [childCount, setChildCount] = useState(0);
+  const [vehicleInputs, setVehicleInputs] = useState([]);
+  const [vehicleInputText, setVehicleInputText] = useState('');
   const [checkoutDateError, setCheckoutDateError] = useState(null);
   const [submitError, setSubmitError] = useState(null);
   const [submitLoading, setSubmitLoading] = useState(false);
@@ -83,6 +85,8 @@ export default function ConvertCheckinModal({ opened, onClose, reservation, room
     setMaleCount(0);
     setFemaleCount(0);
     setChildCount(0);
+    setVehicleInputs([]);
+    setVehicleInputText('');
     setSubmitError(null);
     setCheckoutDateError(null);
   }, [opened, reservation, indiaId]);
@@ -269,6 +273,10 @@ export default function ConvertCheckinModal({ opened, onClose, reservation, room
         }
       }
 
+      if (vehicleInputs.length > 0 && checkinData.log_id) {
+        await Promise.all(vehicleInputs.map(v => addStayVehicle(checkinData.log_id, v).catch(() => {})));
+      }
+
       await api.delete(`/v1/reservation/${reservation.id}/`);
       qc.invalidateQueries({ queryKey: QUERY_KEYS.activeLogs });
       qc.invalidateQueries({ queryKey: QUERY_KEYS.rooms });
@@ -376,6 +384,41 @@ export default function ConvertCheckinModal({ opened, onClose, reservation, room
                       <NumberInput label="Children" min={0} value={childCount} onChange={setChildCount} />
                     </Grid.Col>
                   </Grid>
+                </Grid.Col>
+                <Grid.Col span={12}>
+                  <Text size="sm" fw={500} mb={6}>Vehicles</Text>
+                  <Group gap="xs" mb="xs">
+                    <TextInput
+                      placeholder="e.g. DL 01 AB 1234"
+                      value={vehicleInputText}
+                      onChange={(e) => setVehicleInputText(e.currentTarget.value.toUpperCase())}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          const v = vehicleInputText.trim();
+                          if (v) { setVehicleInputs(prev => [...prev, v]); setVehicleInputText(''); }
+                        }
+                      }}
+                      style={{ flex: 1 }}
+                      size="sm"
+                    />
+                    <Button size="sm" variant="light" onClick={() => {
+                      const v = vehicleInputText.trim();
+                      if (v) { setVehicleInputs(prev => [...prev, v]); setVehicleInputText(''); }
+                    }}>Add</Button>
+                  </Group>
+                  {vehicleInputs.length > 0 && (
+                    <Group gap="xs" wrap="wrap">
+                      {vehicleInputs.map((v, i) => (
+                        <Badge key={i} variant="light" size="lg" rightSection={
+                          <ActionIcon size="xs" color="red" variant="transparent"
+                            onClick={() => setVehicleInputs(prev => prev.filter((_, idx) => idx !== i))}>
+                            ×
+                          </ActionIcon>
+                        }>{v}</Badge>
+                      ))}
+                    </Group>
+                  )}
                 </Grid.Col>
               </Grid>
 

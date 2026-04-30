@@ -3,7 +3,7 @@ from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, RoomsPriceChart, Reservation, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, ExpenseAttachment, RoomStatusLog, PaymentMethod
+from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, RoomsPriceChart, Reservation, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, ExpenseAttachment, RoomStatusLog, PaymentMethod, StayVehicle
 
 
 class RoomTypeSerializer(serializers.ModelSerializer):
@@ -217,14 +217,21 @@ class StayLogAmenitySerializer(serializers.ModelSerializer):
         extra_kwargs = {'stay_log': {'read_only': True}}
 
 
+class StayVehicleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StayVehicle
+        fields = ['id', 'vehicle_number']
+
+
 class ActiveStayLogSerializer(StayLogSerializer):
     customers = serializers.SerializerMethodField()
     amenities = serializers.SerializerMethodField()
     payments = serializers.SerializerMethodField()
     nc_status = serializers.SerializerMethodField()
+    vehicles = StayVehicleSerializer(many=True, read_only=True)
 
     class Meta(StayLogSerializer.Meta):
-        fields = StayLogSerializer.Meta.fields + ['is_nc', 'customers', 'amenities', 'payments', 'nc_status']
+        fields = StayLogSerializer.Meta.fields + ['is_nc', 'customers', 'amenities', 'payments', 'nc_status', 'vehicles']
 
     def get_customers(self, obj):
         return [

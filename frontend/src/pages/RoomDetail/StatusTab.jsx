@@ -17,6 +17,7 @@ import api from '../../api/client';
 import {
   QUERY_KEYS, QUERY_KEYS_OPS,
   fetchGroupCustomers, fetchConfigurations, fetchCountryCodes, fetchAmenities, fetchPriceChart, searchCustomers, fetchPaymentMethods,
+  addStayVehicle, deleteStayVehicle,
 } from '../../api/queries';
 import { compressImage } from '../../utils/imageUtils';
 import CustomerSelectWithAdd from '../../components/CustomerSelectWithAdd';
@@ -84,6 +85,8 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
   const [maleCount, setMaleCount] = useState(0);
   const [femaleCount, setFemaleCount] = useState(0);
   const [childCount, setChildCount] = useState(0);
+  const [vehicleInputs, setVehicleInputs] = useState([]);
+  const [vehicleInputText, setVehicleInputText] = useState('');
   const ciDebounceTimers = useRef({});
 
   const { data: codes = [] } = useQuery({ queryKey: QUERY_KEYS.countryCodes, queryFn: fetchCountryCodes });
@@ -127,6 +130,8 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
     setMaleCount(0);
     setFemaleCount(0);
     setChildCount(0);
+    setVehicleInputs([]);
+    setVehicleInputText('');
   };
 
   const updateCheckinGuest = (idx, field, value) => {
@@ -315,6 +320,10 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
         }
       }
 
+      if (vehicleInputs.length > 0 && checkinData.log_id) {
+        await Promise.all(vehicleInputs.map(v => addStayVehicle(checkinData.log_id, v).catch(() => {})));
+      }
+
       qc.invalidateQueries(QUERY_KEYS.activeLogs);
       qc.invalidateQueries(QUERY_KEYS.rooms);
       setShowForm(false);
@@ -360,6 +369,27 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
     onError: (e) => notifyError(parseApiError(e, 'Failed to grant grace period.')),
   });
 
+  const [newVehicleText, setNewVehicleText] = useState('');
+
+  const addVehicleMutation = useMutation({
+    mutationFn: ({ logId, vehicleNumber }) => addStayVehicle(logId, vehicleNumber),
+    onSuccess: () => {
+      qc.invalidateQueries(QUERY_KEYS.activeLogs);
+      setNewVehicleText('');
+      notifySuccess('Vehicle added.');
+    },
+    onError: (e) => notifyError(parseApiError(e, 'Failed to add vehicle.')),
+  });
+
+  const deleteVehicleMutation = useMutation({
+    mutationFn: (vehicleId) => deleteStayVehicle(vehicleId),
+    onSuccess: () => {
+      qc.invalidateQueries(QUERY_KEYS.activeLogs);
+      notifySuccess('Vehicle removed.');
+    },
+    onError: (e) => notifyError(parseApiError(e, 'Failed to remove vehicle.')),
+  });
+
   // ── Occupied view ──
   if (activeLog) {
     const nights = Math.max(1, dayjs().diff(dayjs(activeLog.check_in), 'day'));
@@ -386,44 +416,108 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
 
     return (
       <Stack gap="sm">
-        <Stack gap={0} maw={400}>
-          {(() => {
-            const totalPaid = (activeLog.payments || []).reduce((s, p) => s + Number(p.amount), 0);
-            return (
-              <>
-                <DescRow label="Check-In" value={dayjs(activeLog.check_in).format('DD MMM YYYY, hh:mm A')} />
-                <DescRow label="Expected Checkout"
-                  value={activeLog.expected_checkout
-                    ? dayjs(activeLog.expected_checkout).format('DD MMM YYYY, hh:mm A') : '—'} />
-                <DescRow label="Nights" value={nights} />
-                <DescRow label="Extra Beds" value={activeLog.extra_bed} />
-                {activeLog.extra_bed > 0 && (
-                  <DescRow label="Price/Extra Bed" value={`₹${activeLog.extra_per_bed_price}`} />
-                )}
-                <DescRow label="Price" value={`₹${activeLog.price}`} />
-                {amenityCost > 0 && (
-                  <DescRow label="Amenities" value={`₹${amenityCost}`} />
-                )}
-                {overtime && (
-                  <DescRow label="Overtime Fee" value={`₹${overtimeFee}`} />
-                )}
-                {gstAmount > 0 && (
-                  <DescRow label={`GST (${configMap['gst_percent']}%)${activeLog.gst_inclusive ? ' (incl.)' : ''}`} value={`₹${gstAmount}`} />
-                )}
-                <DescRow label="Total Cost" value={`₹${totalCost}`} />
-                <DescRow label="Advance Paid" value={`₹${totalPaid}`} />
-                <DescRow label="Balance Due" value={`₹${Math.max(0, totalCost - totalPaid)}`} highlight={totalCost - totalPaid > 0} />
-                {(activeLog.male_count > 0 || activeLog.female_count > 0 || activeLog.child_count > 0) && (
-                  <DescRow label="Occupants" value={[
-                    activeLog.male_count > 0 ? `${activeLog.male_count}M` : null,
-                    activeLog.female_count > 0 ? `${activeLog.female_count}F` : null,
-                    activeLog.child_count > 0 ? `${activeLog.child_count}C` : null,
-                  ].filter(Boolean).join(' · ')} />
-                )}
-              </>
-            );
-          })()}
-        </Stack>
+        <Group align="flex-start" gap="xl" wrap="wrap">
+          <Stack gap={0} style={{ minWidth: 300, flex: '0 1 400px' }}>
+            {(() => {
+              const totalPaid = (activeLog.payments || []).reduce((s, p) => s + Number(p.amount), 0);
+              return (
+                <>
+                  <DescRow label="Check-In" value={dayjs(activeLog.check_in).format('DD MMM YYYY, hh:mm A')} />
+                  <DescRow label="Expected Checkout"
+                    value={activeLog.expected_checkout
+                      ? dayjs(activeLog.expected_checkout).format('DD MMM YYYY, hh:mm A') : '—'} />
+                  <DescRow label="Nights" value={nights} />
+                  <DescRow label="Extra Beds" value={activeLog.extra_bed} />
+                  {activeLog.extra_bed > 0 && (
+                    <DescRow label="Price/Extra Bed" value={`₹${activeLog.extra_per_bed_price}`} />
+                  )}
+                  <DescRow label="Price" value={`₹${activeLog.price}`} />
+                  {amenityCost > 0 && (
+                    <DescRow label="Amenities" value={`₹${amenityCost}`} />
+                  )}
+                  {overtime && (
+                    <DescRow label="Overtime Fee" value={`₹${overtimeFee}`} />
+                  )}
+                  {gstAmount > 0 && (
+                    <DescRow label={`GST (${configMap['gst_percent']}%)${activeLog.gst_inclusive ? ' (incl.)' : ''}`} value={`₹${gstAmount}`} />
+                  )}
+                  <DescRow label="Total Cost" value={`₹${totalCost}`} />
+                  <DescRow label="Advance Paid" value={`₹${totalPaid}`} />
+                  <DescRow label="Balance Due" value={`₹${Math.max(0, totalCost - totalPaid)}`} highlight={totalCost - totalPaid > 0} />
+                  {(activeLog.male_count > 0 || activeLog.female_count > 0 || activeLog.child_count > 0) && (
+                    <DescRow label="Occupants" value={[
+                      activeLog.male_count > 0 ? `${activeLog.male_count}M` : null,
+                      activeLog.female_count > 0 ? `${activeLog.female_count}F` : null,
+                      activeLog.child_count > 0 ? `${activeLog.child_count}C` : null,
+                    ].filter(Boolean).join(' · ')} />
+                  )}
+                </>
+              );
+            })()}
+          </Stack>
+
+          <Stack gap="xs" style={{ minWidth: 200 }}>
+            <Table withTableBorder withColumnBorders style={{ minWidth: 220 }}>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th style={{ width: 36 }}>#</Table.Th>
+                  <Table.Th>
+                    <Group gap="xs" wrap="nowrap">
+                      <TextInput
+                        placeholder="e.g. DL 01 AB 1234"
+                        value={newVehicleText}
+                        size="xs"
+                        style={{ flex: 1 }}
+                        onChange={(e) => setNewVehicleText(e.currentTarget.value.toUpperCase())}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            const v = newVehicleText.trim();
+                            if (v) addVehicleMutation.mutate({ logId: activeLog.id, vehicleNumber: v });
+                          }
+                        }}
+                      />
+                      <Button size="xs" variant="light"
+                        loading={addVehicleMutation.isPending}
+                        onClick={() => {
+                          const v = newVehicleText.trim();
+                          if (v) addVehicleMutation.mutate({ logId: activeLog.id, vehicleNumber: v });
+                        }}>
+                        Add
+                      </Button>
+                    </Group>
+                  </Table.Th>
+                  <Table.Th style={{ width: 36 }} />
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {(activeLog.vehicles || []).length === 0 ? (
+                  <Table.Tr>
+                    <Table.Td colSpan={3}>
+                      <Text size="xs" c="dimmed" ta="center">No vehicles</Text>
+                    </Table.Td>
+                  </Table.Tr>
+                ) : (activeLog.vehicles || []).map((v, i) => (
+                  <Table.Tr key={v.id}>
+                    <Table.Td>
+                      <Text size="sm" c="dimmed">{i + 1}</Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <Text size="sm" fw={500}>{v.vehicle_number}</Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <ActionIcon size="sm" color="red" variant="light"
+                        loading={deleteVehicleMutation.isPending}
+                        onClick={() => deleteVehicleMutation.mutate(v.id)}>
+                        <IconTrash size={12} />
+                      </ActionIcon>
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </Stack>
+        </Group>
         {activeLog.is_early_checkin && (
           <Badge color="cyan" variant="light" size="sm">Early Check-In</Badge>
         )}
@@ -775,6 +869,41 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
                   <NumberInput label="Children" min={0} value={childCount} onChange={setChildCount} />
                 </Grid.Col>
               </Grid>
+            </Grid.Col>
+            <Grid.Col span={12}>
+              <Text size="sm" fw={500} mb={6}>Vehicles</Text>
+              <Group gap="xs" mb="xs">
+                <TextInput
+                  placeholder="e.g. DL 01 AB 1234"
+                  value={vehicleInputText}
+                  onChange={(e) => setVehicleInputText(e.currentTarget.value.toUpperCase())}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      const v = vehicleInputText.trim();
+                      if (v) { setVehicleInputs(prev => [...prev, v]); setVehicleInputText(''); }
+                    }
+                  }}
+                  style={{ flex: 1 }}
+                  size="sm"
+                />
+                <Button size="sm" variant="light" onClick={() => {
+                  const v = vehicleInputText.trim();
+                  if (v) { setVehicleInputs(prev => [...prev, v]); setVehicleInputText(''); }
+                }}>Add</Button>
+              </Group>
+              {vehicleInputs.length > 0 && (
+                <Group gap="xs" wrap="wrap">
+                  {vehicleInputs.map((v, i) => (
+                    <Badge key={i} variant="light" size="lg" rightSection={
+                      <ActionIcon size="xs" color="red" variant="transparent"
+                        onClick={() => setVehicleInputs(prev => prev.filter((_, idx) => idx !== i))}>
+                        ×
+                      </ActionIcon>
+                    }>{v}</Badge>
+                  ))}
+                </Group>
+              )}
             </Grid.Col>
           </Grid>
 
