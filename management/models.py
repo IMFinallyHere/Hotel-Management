@@ -211,14 +211,10 @@ class Payment(models.Model):
 
 
 class CashWithdrawal(models.Model):
-    STATUS = [('pending', 'Pending'), ('approved', 'Approved'), ('rejected', 'Rejected')]
     amount = models.DecimalField(max_digits=10, decimal_places=0)
     reason = models.TextField()
-    status = models.CharField(max_length=10, choices=STATUS, default='pending')
     requested_by = models.ForeignKey(User, models.SET_NULL, null=True, related_name='cash_withdrawals')
-    reviewed_by = models.ForeignKey(User, models.SET_NULL, null=True, blank=True, related_name='cash_withdrawals_reviewed')
     created_on = models.DateTimeField(auto_now_add=True)
-    reviewed_on = models.DateTimeField(null=True, blank=True)
     date = models.DateField(default=timezone.localdate)
 
 

@@ -362,22 +362,15 @@ class PaymentSerializer(serializers.ModelSerializer):
 
 class CashWithdrawalSerializer(serializers.ModelSerializer):
     requested_by_name = serializers.SerializerMethodField()
-    reviewed_by_name = serializers.SerializerMethodField()
 
     class Meta:
         model = CashWithdrawal
-        fields = ['id', 'amount', 'reason', 'status', 'requested_by', 'requested_by_name',
-                  'reviewed_by', 'reviewed_by_name', 'created_on', 'reviewed_on', 'date']
-        read_only_fields = ['status', 'requested_by', 'reviewed_by', 'reviewed_on']
+        fields = ['id', 'amount', 'reason', 'requested_by', 'requested_by_name', 'created_on', 'date']
+        read_only_fields = ['requested_by']
 
     def get_requested_by_name(self, obj):
         if obj.requested_by:
             return obj.requested_by.get_full_name() or obj.requested_by.username
-        return None
-
-    def get_reviewed_by_name(self, obj):
-        if obj.reviewed_by:
-            return obj.reviewed_by.get_full_name() or obj.reviewed_by.username
         return None
 
 

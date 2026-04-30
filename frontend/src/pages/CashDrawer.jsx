@@ -1,23 +1,19 @@
 import { useState } from 'react';
-import { Table, Button, Badge, Group, Text, Modal, NumberInput, Textarea, Stack } from '@mantine/core';
+import { Table, Button, Group, Text, Modal, NumberInput, Textarea, Stack } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { useDisclosure } from '@mantine/hooks';
 import { IconPlus } from '@tabler/icons-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import dayjs from 'dayjs';
 import api from '../api/client';
 import { QUERY_KEYS_OPS, fetchCashWithdrawals } from '../api/queries';
 import { notifySuccess, notifyError } from '../api/notify';
 import { parseApiError } from '../api/errorUtils';
 import usePermissions from '../hooks/usePermissions';
 
-const STATUS_COLORS = { pending: 'orange', approved: 'green', rejected: 'red' };
-
 export default function CashDrawer() {
   const qc = useQueryClient();
   const { permissions } = usePermissions();
-  const canWithdraw = permissions.add_cashwithdrawal  || permissions.is_superuser;
-  const canApprove  = permissions.change_cashwithdrawal || permissions.is_superuser;
+  const canWithdraw = permissions.add_cashwithdrawal || permissions.is_superuser;
 
   const { data: withdrawals = [], isLoading } = useQuery({
     queryKey: QUERY_KEYS_OPS.cashWithdrawals,
@@ -40,62 +36,19 @@ export default function CashDrawer() {
       qc.invalidateQueries(QUERY_KEYS_OPS.cashWithdrawals);
       close();
       form.reset();
-      notifySuccess('Withdrawal request submitted.');
+      notifySuccess('Withdrawal recorded.');
     },
-    onError: (e) => notifyError(parseApiError(e, 'Failed to submit withdrawal.')),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to record withdrawal.')),
   });
 
-  const approveMutation = useMutation({
-    mutationFn: (id) => api.post(`/v1/cash-withdrawals/${id}/approve/`),
-    onSuccess: () => {
-      qc.invalidateQueries(QUERY_KEYS_OPS.cashWithdrawals);
-      notifySuccess('Withdrawal approved.');
-    },
-    onError: (e) => notifyError(parseApiError(e, 'Failed to approve.')),
-  });
-
-  const rejectMutation = useMutation({
-    mutationFn: (id) => api.post(`/v1/cash-withdrawals/${id}/reject/`),
-    onSuccess: () => {
-      qc.invalidateQueries(QUERY_KEYS_OPS.cashWithdrawals);
-      notifySuccess('Withdrawal rejected.');
-    },
-    onError: (e) => notifyError(parseApiError(e, 'Failed to reject.')),
-  });
-
-  const rows = withdrawals.map((w) => (
-    <Table.Tr key={w.id}>
-      <Table.Td>{w.date}</Table.Td>
-      <Table.Td>₹{w.amount}</Table.Td>
-      <Table.Td style={{ maxWidth: 300, whiteSpace: 'pre-wrap' }}>{w.reason}</Table.Td>
-      <Table.Td>
-        <Badge color={STATUS_COLORS[w.status]} variant="light">{w.status}</Badge>
-      </Table.Td>
-      <Table.Td>{w.requested_by_name ?? '—'}</Table.Td>
-      <Table.Td>{w.reviewed_by_name ?? '—'}</Table.Td>
-      <Table.Td>
-        {canApprove && w.status === 'pending' && (
-          <Group gap="xs">
-            <Button size="xs" color="green" variant="light" onClick={() => approveMutation.mutate(w.id)} loading={approveMutation.isPending}>
-              Approve
-            </Button>
-            <Button size="xs" color="red" variant="light" onClick={() => rejectMutation.mutate(w.id)} loading={rejectMutation.isPending}>
-              Reject
-            </Button>
-          </Group>
-        )}
-      </Table.Td>
-    </Table.Tr>
-  ));
+  const total = withdrawals.reduce((s, w) => s + Number(w.amount), 0);
 
   return (
     <>
       <Group mb="md" justify="space-between" wrap="wrap">
-        <Group wrap="wrap">
+        <Group wrap="wrap" gap="sm">
           <Text fw={600} size="lg">Cash Drawer / Petty Cash</Text>
-          <Badge color="orange" variant="light">
-            {withdrawals.filter(w => w.status === 'pending').length} pending
-          </Badge>
+          <Text size="sm" c="dimmed">Total withdrawn: <Text span fw={600} c="dark">₹{total.toLocaleString()}</Text></Text>
         </Group>
         {canWithdraw && (
           <Button leftSection={<IconPlus size={16} />} onClick={() => { form.reset(); open(); }}>
@@ -104,27 +57,31 @@ export default function CashDrawer() {
         )}
       </Group>
 
-      <Table.ScrollContainer minWidth={600}>
-      <Table striped highlightOnHover withTableBorder>
-        <Table.Thead>
-          <Table.Tr>
-            <Table.Th>Date</Table.Th>
-            <Table.Th>Amount</Table.Th>
-            <Table.Th>Reason</Table.Th>
-            <Table.Th>Status</Table.Th>
-            <Table.Th>Requested By</Table.Th>
-            <Table.Th>Reviewed By</Table.Th>
-            <Table.Th>Actions</Table.Th>
-          </Table.Tr>
-        </Table.Thead>
-        <Table.Tbody>
-          {isLoading ? (
-            <Table.Tr><Table.Td colSpan={7} ta="center">Loading...</Table.Td></Table.Tr>
-          ) : rows.length === 0 ? (
-            <Table.Tr><Table.Td colSpan={7} ta="center">No withdrawals recorded.</Table.Td></Table.Tr>
-          ) : rows}
-        </Table.Tbody>
-      </Table>
+      <Table.ScrollContainer minWidth={500}>
+        <Table striped highlightOnHover withTableBorder>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>Date</Table.Th>
+              <Table.Th>Amount</Table.Th>
+              <Table.Th>Reason</Table.Th>
+              <Table.Th>Recorded By</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {isLoading ? (
+              <Table.Tr><Table.Td colSpan={4} ta="center">Loading...</Table.Td></Table.Tr>
+            ) : withdrawals.length === 0 ? (
+              <Table.Tr><Table.Td colSpan={4} ta="center">No withdrawals recorded.</Table.Td></Table.Tr>
+            ) : withdrawals.map((w) => (
+              <Table.Tr key={w.id}>
+                <Table.Td>{w.date}</Table.Td>
+                <Table.Td>₹{Number(w.amount).toLocaleString()}</Table.Td>
+                <Table.Td style={{ maxWidth: 300, whiteSpace: 'pre-wrap' }}>{w.reason}</Table.Td>
+                <Table.Td>{w.requested_by_name ?? '—'}</Table.Td>
+              </Table.Tr>
+            ))}
+          </Table.Tbody>
+        </Table>
       </Table.ScrollContainer>
 
       <Modal opened={opened} onClose={close} title="New Cash Withdrawal" size={{ base: '95%', sm: 'lg' }}>
@@ -145,7 +102,7 @@ export default function CashDrawer() {
             />
             <Group justify="flex-end">
               <Button variant="default" onClick={close}>Cancel</Button>
-              <Button type="submit" loading={createMutation.isPending}>Submit</Button>
+              <Button type="submit" loading={createMutation.isPending}>Record Withdrawal</Button>
             </Group>
           </Stack>
         </form>

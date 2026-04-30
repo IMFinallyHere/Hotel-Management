@@ -1393,7 +1393,7 @@ class CashWithdrawalListCreate(generics.ListCreateAPIView):
     permission_classes = [HasModelPermission.for_model('management', 'cashwithdrawal')]
 
     def get_queryset(self):
-        return CashWithdrawal.objects.select_related('requested_by', 'reviewed_by').order_by('-created_on')
+        return CashWithdrawal.objects.select_related('requested_by').order_by('-created_on')
 
     def perform_create(self, serializer):
         serializer.save(requested_by=self.request.user)
@@ -1404,39 +1404,7 @@ class CashWithdrawalDetail(generics.RetrieveUpdateAPIView):
     permission_classes = [HasModelPermission.for_model('management', 'cashwithdrawal')]
 
     def get_queryset(self):
-        return CashWithdrawal.objects.select_related('requested_by', 'reviewed_by')
-
-
-class CashWithdrawalApprove(APIView):
-    permission_classes = [HasModelPermission.for_model('management', 'cashwithdrawal')]
-
-    def post(self, request, pk):
-        if not request.user.is_superuser and not request.user.has_perm('management.change_cashwithdrawal'):
-            return Response({'error': 'Permission denied.'}, status=403)
-        w = get_object_or_404(CashWithdrawal, pk=pk)
-        if w.status != 'pending':
-            return Response({'error': 'Withdrawal is not pending.'}, status=400)
-        w.status = 'approved'
-        w.reviewed_by = request.user
-        w.reviewed_on = timezone.now()
-        w.save()
-        return Response({'success': True})
-
-
-class CashWithdrawalReject(APIView):
-    permission_classes = [HasModelPermission.for_model('management', 'cashwithdrawal')]
-
-    def post(self, request, pk):
-        if not request.user.is_superuser and not request.user.has_perm('management.change_cashwithdrawal'):
-            return Response({'error': 'Permission denied.'}, status=403)
-        w = get_object_or_404(CashWithdrawal, pk=pk)
-        if w.status != 'pending':
-            return Response({'error': 'Withdrawal is not pending.'}, status=400)
-        w.status = 'rejected'
-        w.reviewed_by = request.user
-        w.reviewed_on = timezone.now()
-        w.save()
-        return Response({'success': True})
+        return CashWithdrawal.objects.select_related('requested_by')
 
 
 # -----------  Expense views  -----------
@@ -1696,7 +1664,6 @@ class CashReconciliationView(APIView):
         cash_in = sum(p.amount for p in cash_payments)
 
         withdrawals = CashWithdrawal.objects.filter(
-            status='approved',
             date__gte=start,
             date__lte=end,
         ).select_related('requested_by')
