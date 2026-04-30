@@ -9,8 +9,8 @@ from django.db.models import Q, Count
 from django.db.models import ProtectedError
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, Group, CustomerGroup, RoomsPriceChart, Reservation, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, ExpenseAttachment, RoomStatusLog, PaymentMethod, StayVehicle
-from .serializers import RoomSerializer, RoomTypeSerializer, CountryCodeSerializer, CustomerSerializer, ConfigurationSerializer, CheckinSerializer, GroupCustomerSerializer, RoomsPriceChartSerializer, StayLogSerializer, StayLogUpdateSerializer, ReservationSerializer, ReservationReminderSerializer, AmenitySerializer, StayLogAmenitySerializer, ActiveStayLogSerializer, RoomNCRequestSerializer, PaymentSerializer, CashWithdrawalSerializer, ExpenseSerializer, ExpenseAttachmentSerializer, ExtendStaySerializer, GraceSerializer, ShiftRoomSerializer, RoomStatusLogSerializer, PaymentMethodSerializer, StayVehicleSerializer
+from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, Group, CustomerGroup, RoomsPriceChart, Reservation, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, ExpenseAttachment, RoomStatusLog, PaymentMethod, StayVehicle, FoodOrder, FoodOrderReceipt
+from .serializers import RoomSerializer, RoomTypeSerializer, CountryCodeSerializer, CustomerSerializer, ConfigurationSerializer, CheckinSerializer, GroupCustomerSerializer, RoomsPriceChartSerializer, StayLogSerializer, StayLogUpdateSerializer, ReservationSerializer, ReservationReminderSerializer, AmenitySerializer, StayLogAmenitySerializer, ActiveStayLogSerializer, RoomNCRequestSerializer, PaymentSerializer, CashWithdrawalSerializer, ExpenseSerializer, ExpenseAttachmentSerializer, ExtendStaySerializer, GraceSerializer, ShiftRoomSerializer, RoomStatusLogSerializer, PaymentMethodSerializer, StayVehicleSerializer, FoodOrderSerializer, FoodOrderReceiptSerializer
 from .permissions import report_permission, HasModelPermission
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.permissions import DjangoModelPermissions
@@ -141,6 +141,7 @@ class RoomsPriceChartDetail(generics.RetrieveUpdateDestroyAPIView):
 class StayLogListActive(generics.ListAPIView):
     queryset = RoomStayLogs.objects.filter(check_out=None).select_related('checked_in_by').prefetch_related(
         'group__customers__customer', 'amenities__amenity', 'payments__processed_by', 'nc_requests',
+        'vehicles', 'food_orders__payment_method', 'food_orders__receipts', 'food_orders__ordered_by',
     )
     serializer_class = ActiveStayLogSerializer
     permission_classes = [DjangoModelPermissions]
@@ -1397,6 +1398,69 @@ class StayVehicleDelete(APIView):
         return Response(status=204)
 
 
+class FoodOrderListCreate(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        stay = get_object_or_404(RoomStayLogs, pk=pk)
+        orders = stay.food_orders.select_related('payment_method', 'ordered_by').prefetch_related('receipts').all()
+        return Response(FoodOrderSerializer(orders, many=True, context={'request': request}).data)
+
+    def post(self, request, pk):
+        stay = get_object_or_404(RoomStayLogs, pk=pk)
+        serializer = FoodOrderSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        order = serializer.save(stay_log=stay, ordered_by=request.user)
+        if order.is_paid:
+            order.paid_by = request.user
+            order.save(update_fields=['paid_by'])
+        return Response(FoodOrderSerializer(order, context={'request': request}).data, status=201)
+
+
+class FoodOrderDetail(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, pk):
+        order = get_object_or_404(FoodOrder, pk=pk)
+        serializer = FoodOrderSerializer(order, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        updated = serializer.save()
+        if updated.is_paid and not updated.paid_by:
+            updated.paid_by = request.user
+            updated.save(update_fields=['paid_by'])
+        return Response(FoodOrderSerializer(updated, context={'request': request}).data)
+
+    def delete(self, request, pk):
+        order = get_object_or_404(FoodOrder, pk=pk)
+        order.delete()
+        return Response(status=204)
+
+
+class FoodOrderReceiptCreate(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        order = get_object_or_404(FoodOrder, pk=pk)
+        files = request.FILES.getlist('files')
+        if not files:
+            return Response({'error': 'No files provided.'}, status=400)
+        created = []
+        for f in files:
+            receipt = FoodOrderReceipt.objects.create(food_order=order, file=f)
+            created.append(FoodOrderReceiptSerializer(receipt, context={'request': request}).data)
+        return Response(created, status=201)
+
+
+class FoodOrderReceiptDelete(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, pk):
+        receipt = get_object_or_404(FoodOrderReceipt, pk=pk)
+        receipt.file.delete(save=False)
+        receipt.delete()
+        return Response(status=204)
+
+
 # -----------  Finance report views  -----------
 
 class PLReportView(APIView):
@@ -1778,7 +1842,8 @@ class StayLogHistory(generics.ListAPIView):
         qs = RoomStayLogs.objects.filter(check_out__isnull=False) \
             .select_related('room', 'group', 'checked_in_by') \
             .prefetch_related('group__customers__customer', 'amenities__amenity',
-                              'payments__processed_by', 'nc_requests') \
+                              'payments__processed_by', 'nc_requests',
+                              'food_orders__payment_method', 'food_orders__receipts', 'food_orders__ordered_by') \
             .order_by('-check_out')
 
         search = self.request.query_params.get('search', '').strip()

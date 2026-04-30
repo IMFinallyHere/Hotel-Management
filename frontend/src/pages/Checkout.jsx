@@ -242,8 +242,11 @@ export default function Checkout() {
     const overtimeFee = computeOvertimeFee(record);
     const gstAmount = computeGst(record, nights, configMap['gst_percent']);
     const billTotal = record.is_nc ? 0 : (record.gst_inclusive ? (roomTotal + amenityTotal + overtimeFee) : (roomTotal + amenityTotal + overtimeFee + gstAmount));
+    const gstPct = Number(configMap['gst_percent'] ?? 0) / 100;
+    const foodEffective = (o) => Number(o.amount) + (o.food_gst_inclusive ? 0 : Math.round(Number(o.amount) * gstPct));
+    const unpaidFood = (record.food_orders || []).filter(o => !o.is_paid).reduce((s, o) => s + foodEffective(o), 0);
     const totalPaid = (record.payments || []).reduce((s, p) => s + Number(p.amount), 0);
-    const outstanding = billTotal - totalPaid;
+    const outstanding = billTotal + unpaidFood - totalPaid;
 
     if (outstanding > 0) {
       setPayCheckoutLog(record);
@@ -305,7 +308,9 @@ export default function Checkout() {
       sum + Number(a.price) * a.quantity * (a.charge_type === 'per_night' ? nights : 1), 0);
     const overtimeFee = computeOvertimeFee(log);
     const gstAmount = computeGst(log, nights, configMap['gst_percent']);
-    const total = log.is_nc ? 0 : (log.gst_inclusive ? (roomTotal + amenityTotal + overtimeFee) : (roomTotal + amenityTotal + overtimeFee + gstAmount));
+    const gstPctRow = Number(configMap['gst_percent'] ?? 0) / 100;
+    const unpaidFoodRow = (log.food_orders || []).filter(o => !o.is_paid).reduce((s, o) => s + Number(o.amount) + (o.food_gst_inclusive ? 0 : Math.round(Number(o.amount) * gstPctRow)), 0);
+    const total = (log.is_nc ? 0 : (log.gst_inclusive ? (roomTotal + amenityTotal + overtimeFee) : (roomTotal + amenityTotal + overtimeFee + gstAmount))) + unpaidFoodRow;
     const ncStatus = log.nc_status;
 
     const room = roomMap[log.room];

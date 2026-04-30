@@ -16,6 +16,7 @@ from .views import (RoomTypeListCreate, RoomTypeDetail, RoomListCreate, RoomDeta
                     CashWithdrawalListCreate, CashWithdrawalDetail, CashWithdrawalApprove, CashWithdrawalReject,
                     ExpenseListCreate, ExpenseDetail, ExpenseAttachmentCreate, ExpenseAttachmentDelete,
                     StayVehicleCreate, StayVehicleDelete,
+                    FoodOrderListCreate, FoodOrderDetail, FoodOrderReceiptCreate, FoodOrderReceiptDelete,
                     PLReportView, StaffSalesView, CashReconciliationView, ExpenseReportView,
                     ExtendStay, GrantGrace, ShiftRoom, GSTReportView, StayLogHistory,
                     ReservationReminderListCreate, ReservationReminderDetail)
@@ -72,6 +73,10 @@ urlpatterns = [
     path('expense-attachments/<int:pk>/', ExpenseAttachmentDelete.as_view(), name='expense-attachment-delete'),
     path('stay-logs/<int:pk>/vehicles/', StayVehicleCreate.as_view(), name='stay-vehicle-create'),
     path('vehicles/<int:pk>/', StayVehicleDelete.as_view(), name='stay-vehicle-delete'),
+    path('stay-logs/<int:pk>/food-orders/', FoodOrderListCreate.as_view(), name='food-order-list-create'),
+    path('food-orders/<int:pk>/', FoodOrderDetail.as_view(), name='food-order-detail'),
+    path('food-orders/<int:pk>/receipts/', FoodOrderReceiptCreate.as_view(), name='food-order-receipt-create'),
+    path('food-order-receipts/<int:pk>/', FoodOrderReceiptDelete.as_view(), name='food-order-receipt-delete'),
     path('reports/gst/', GSTReportView.as_view(), name='report-gst'),
     path('reports/revenue/', RevenueReportView.as_view(), name='report-revenue'),
     path('reports/occupancy/', OccupancyReportView.as_view(), name='report-occupancy'),

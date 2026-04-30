@@ -152,8 +152,8 @@ export default function InvoiceDocument({ log, roomNumber, roomTypeName, configM
 
   const acLabel  = log.is_ac === true ? ' (AC)' : log.is_ac === false ? ' (Non-AC)' : '';
   const roomLabel = `${roomNumber}${acLabel}${roomTypeName ? ` | ${roomTypeName}` : ''}`;
-  const checkInStr  = dayjs(log.check_in).format('dddd, MMMM D, YYYY');
-  const checkOutStr = log.check_out ? dayjs(log.check_out).format('dddd, MMMM D, YYYY') : '—';
+  const checkInStr  = dayjs(log.check_in).format('dddd, MMMM D, YYYY, hh:mm A');
+  const checkOutStr = log.check_out ? dayjs(log.check_out).format('dddd, MMMM D, YYYY, hh:mm A') : '—';
   const invoiceDate = log.check_out ? dayjs(log.check_out).format('DD-MM-YYYY') : dayjs().format('DD-MM-YYYY');
   const invoiceNum  = String(log.id).padStart(7, '0');
 
@@ -186,23 +186,34 @@ export default function InvoiceDocument({ log, roomNumber, roomTypeName, configM
     total: Number(a.price) * a.quantity * (a.charge_type === 'per_night' ? nights : 1),
   }));
   const amenityTotal = amenityRows.reduce((sum, a) => sum + a.total, 0);
-  const subtotal     = log.is_nc ? 0 : (roomChargeTotal + extraBedTotal + amenityTotal);
+  const baseSubtotal = log.is_nc ? 0 : (roomChargeTotal + extraBedTotal + amenityTotal);
+
+  // Food orders (excluded from room GST base)
+  const foodOrders    = log.food_orders || [];
+  const foodGstPct    = gstPercent / 100;
+  const foodEffective = (o) => Number(o.amount) + (o.food_gst_inclusive ? 0 : Math.round(Number(o.amount) * foodGstPct));
+  const foodGstAmount = foodOrders.filter(o => !o.food_gst_inclusive).reduce((s, o) => s + Math.round(Number(o.amount) * foodGstPct), 0);
+  const foodTotal     = foodOrders.reduce((s, o) => s + foodEffective(o), 0);
+  const paidFoodTotal = foodOrders.filter(o => o.is_paid).reduce((s, o) => s + foodEffective(o), 0);
+
+  const subtotal = baseSubtotal;
 
   let gstAmount = 0;
   let gstLabel  = '';
   if (log.gst_applied && !log.is_nc && gstPercent > 0) {
     if (log.gst_inclusive) {
-      gstAmount = Math.round(subtotal - subtotal / (1 + gstPercent / 100));
+      gstAmount = Math.round(baseSubtotal - baseSubtotal / (1 + gstPercent / 100));
       gstLabel  = `GST (${gstPercent}%, incl.)`;
     } else {
-      gstAmount = Math.round(subtotal * gstPercent / 100);
+      gstAmount = Math.round(baseSubtotal * gstPercent / 100);
       gstLabel  = `GST (${gstPercent}%)`;
     }
   }
 
-  const grandTotal = log.is_nc ? 0 : (log.gst_inclusive ? subtotal : subtotal + gstAmount);
+  const roomTotal  = log.is_nc ? 0 : (log.gst_inclusive ? baseSubtotal : baseSubtotal + gstAmount);
+  const grandTotal = log.is_nc ? 0 : (roomTotal + foodTotal);
   const totalPaid  = (log.payments || []).reduce((s, p) => s + Number(p.amount), 0);
-  const balance    = grandTotal - totalPaid;
+  const balance    = grandTotal - totalPaid - paidFoodTotal;
 
   // Line items
   const lineItems = log.is_nc ? [] : [
@@ -316,14 +327,19 @@ export default function InvoiceDocument({ log, roomNumber, roomTypeName, configM
             ))
           )}
 
-          {/* Summary: subtotal */}
+          {/* Summary: subtotal (room only) */}
           {!log.is_nc ? (
             <SRow label="Subtotal" value={fmt(subtotal)} />
           ) : null}
 
-          {/* Summary: GST */}
+          {/* Summary: GST (on room/amenities only) */}
           {!log.is_nc && gstAmount > 0 ? (
             <SRow label={gstLabel} value={fmt(gstAmount)} />
+          ) : null}
+
+          {/* Summary: Food (incl. GST) */}
+          {!log.is_nc && foodTotal > 0 ? (
+            <SRow label="Food (incl. GST)" value={fmt(foodTotal)} />
           ) : null}
 
           {/* Summary: Total */}
@@ -334,6 +350,11 @@ export default function InvoiceDocument({ log, roomNumber, roomTypeName, configM
           {/* Summary: Paid */}
           {!log.is_nc ? (
             <SRow label="Paid" value={fmt(totalPaid)} />
+          ) : null}
+
+          {/* Summary: Food Paid on-spot */}
+          {!log.is_nc && paidFoodTotal > 0 ? (
+            <SRow label="Food Paid (on-spot)" value={fmt(paidFoodTotal)} />
           ) : null}
 
           {/* Summary: Balance Due */}
@@ -348,10 +369,6 @@ export default function InvoiceDocument({ log, roomNumber, roomTypeName, configM
 
         </View>
 
-        {/* Tax note */}
-        {gstAmount > 0 && !log.gst_inclusive ? (
-          <Text style={s.taxNote}>*{gstLabel}: {gstPercent}%</Text>
-        ) : null}
 
         {/* ── Payments Received ── */}
         {(log.payments || []).length > 0 ? (
@@ -362,7 +379,7 @@ export default function InvoiceDocument({ log, roomNumber, roomTypeName, configM
                 <Text style={s.payLabel}>
                   {(p.payment_method_name || p.payment_type || '—').toUpperCase()}
                   {p.processed_by_name ? ` · ${p.processed_by_name}` : ''}
-                  {` · ${dayjs(p.created_on).format('DD MMM YYYY')}`}
+                  {` · ${dayjs(p.created_on).format('DD MMM YYYY, hh:mm A')}`}
                   {p.note ? ` · ${p.note}` : ''}
                 </Text>
                 <Text style={[s.payAmt, s.money]}>{fmt(p.amount)}</Text>

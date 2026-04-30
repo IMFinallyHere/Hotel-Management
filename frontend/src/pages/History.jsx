@@ -51,7 +51,11 @@ export default function History() {
     const amenityTotal = (log.amenities || []).reduce((sum, a) =>
       sum + Number(a.price) * a.quantity * (a.charge_type === 'per_night' ? nights : 1), 0);
     const gstAmount = computeGst(log, nights, configMap['gst_percent']);
-    const total = log.is_nc ? 0 : (log.gst_inclusive ? (roomTotal + amenityTotal) : (roomTotal + amenityTotal + gstAmount));
+    const gstPct = Number(configMap['gst_percent'] ?? 0) / 100;
+    const foodEff = (o) => Number(o.amount) + (o.food_gst_inclusive ? 0 : Math.round(Number(o.amount) * gstPct));
+    const unpaidFood = (log.food_orders || []).filter(o => !o.is_paid).reduce((s, o) => s + foodEff(o), 0);
+    const totalFood = (log.food_orders || []).reduce((s, o) => s + foodEff(o), 0);
+    const total = (log.is_nc ? 0 : (log.gst_inclusive ? (roomTotal + amenityTotal) : (roomTotal + amenityTotal + gstAmount))) + unpaidFood;
     const guests = (log.customers || []).map(c => c.name).join(', ') || '—';
 
     const room = roomMap[log.room];
@@ -75,6 +79,7 @@ export default function History() {
         <Table.Td>{log.is_nc ? '—' : `₹${roomTotal}`}</Table.Td>
         <Table.Td>{gstAmount > 0 ? <Badge color="teal" variant="light">₹{gstAmount}</Badge> : '—'}</Table.Td>
         <Table.Td>{amenityTotal > 0 ? `₹${amenityTotal}` : '—'}</Table.Td>
+        <Table.Td>{totalFood > 0 ? `₹${totalFood}` : '—'}</Table.Td>
         <Table.Td fw={600}>{log.is_nc ? <Badge color="grape" variant="light">₹0 (NC)</Badge> : `₹${total}`}</Table.Td>
         <Table.Td>
           {log.gst_applied ? (
@@ -145,6 +150,7 @@ export default function History() {
               <Table.Th>Room Base</Table.Th>
               <Table.Th>GST</Table.Th>
               <Table.Th>Amenities</Table.Th>
+              <Table.Th>Food</Table.Th>
               <Table.Th>Total</Table.Th>
               <Table.Th>Invoice</Table.Th>
             </Table.Tr>
@@ -153,14 +159,14 @@ export default function History() {
             {isLoading ? (
               Array.from({ length: 5 }).map((_, i) => (
                 <Table.Tr key={i}>
-                  {Array.from({ length: 10 }).map((_, j) => (
+                  {Array.from({ length: 11 }).map((_, j) => (
                     <Table.Td key={j}><Skeleton height={16} /></Table.Td>
                   ))}
                 </Table.Tr>
               ))
             ) : rows.length === 0 ? (
               <Table.Tr>
-                <Table.Td colSpan={10} ta="center">
+                <Table.Td colSpan={11} ta="center">
                   <Text size="sm" c="dimmed">No past stays found.</Text>
                 </Table.Td>
               </Table.Tr>

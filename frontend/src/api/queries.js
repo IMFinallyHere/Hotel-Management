@@ -99,3 +99,15 @@ export const fetchDueReminders = () => api.get('/v1/reminders/').then(r => r.dat
 export const addStayVehicle = (logId, vehicleNumber) =>
   api.post(`/v1/stay-logs/${logId}/vehicles/`, { vehicle_number: vehicleNumber }).then(r => r.data);
 export const deleteStayVehicle = (vehicleId) => api.delete(`/v1/vehicles/${vehicleId}/`);
+
+export const addFoodOrder = (logId, data) =>
+  api.post(`/v1/stay-logs/${logId}/food-orders/`, data).then(r => r.data);
+export const updateFoodOrder = (orderId, data) =>
+  api.patch(`/v1/food-orders/${orderId}/`, data).then(r => r.data);
+export const deleteFoodOrder = (orderId) => api.delete(`/v1/food-orders/${orderId}/`);
+export const addFoodOrderReceipt = (orderId, files) => {
+  const fd = new FormData();
+  files.forEach(f => fd.append('files', f));
+  return api.post(`/v1/food-orders/${orderId}/receipts/`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }).then(r => r.data);
+};
+export const deleteFoodOrderReceipt = (receiptId) => api.delete(`/v1/food-order-receipts/${receiptId}/`);

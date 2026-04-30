@@ -133,8 +133,11 @@ export default function RoomDetail() {
     const overtimeFee = computeOvertimeFee(activeLog);
     const gstAmount = computeGst(activeLog, nights, configMap['gst_percent']);
     const billTotal = activeLog.is_nc ? 0 : (activeLog.gst_inclusive ? (roomTotal + amenityTotal + overtimeFee) : (roomTotal + amenityTotal + overtimeFee + gstAmount));
+    const gstPct = Number(configMap['gst_percent'] ?? 0) / 100;
+    const foodEffective = (o) => Number(o.amount) + (o.food_gst_inclusive ? 0 : Math.round(Number(o.amount) * gstPct));
+    const unpaidFood = (activeLog.food_orders || []).filter(o => !o.is_paid).reduce((s, o) => s + foodEffective(o), 0);
     const totalPaid = (activeLog.payments || []).reduce((s, p) => s + Number(p.amount), 0);
-    const outstandingAmt = billTotal - totalPaid;
+    const outstandingAmt = billTotal + unpaidFood - totalPaid;
 
     if (outstandingAmt > 0) {
       setPayCheckoutAmount(outstandingAmt);

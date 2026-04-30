@@ -3,7 +3,7 @@ from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, RoomsPriceChart, Reservation, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, ExpenseAttachment, RoomStatusLog, PaymentMethod, StayVehicle
+from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, RoomsPriceChart, Reservation, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, ExpenseAttachment, RoomStatusLog, PaymentMethod, StayVehicle, FoodOrder, FoodOrderReceipt
 
 
 class RoomTypeSerializer(serializers.ModelSerializer):
@@ -223,15 +223,39 @@ class StayVehicleSerializer(serializers.ModelSerializer):
         fields = ['id', 'vehicle_number']
 
 
+class FoodOrderReceiptSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FoodOrderReceipt
+        fields = ['id', 'file', 'uploaded_on']
+
+
+class FoodOrderSerializer(serializers.ModelSerializer):
+    payment_method_name = serializers.CharField(source='payment_method.name', read_only=True, default=None)
+    ordered_by_name = serializers.SerializerMethodField()
+    receipts = FoodOrderReceiptSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = FoodOrder
+        fields = ['id', 'description', 'amount', 'food_gst_inclusive', 'is_paid', 'payment_method', 'payment_method_name',
+                  'ordered_by_name', 'ordered_at', 'receipts']
+        read_only_fields = ['ordered_by_name', 'ordered_at']
+
+    def get_ordered_by_name(self, obj):
+        if obj.ordered_by:
+            return obj.ordered_by.get_full_name() or obj.ordered_by.username
+        return None
+
+
 class ActiveStayLogSerializer(StayLogSerializer):
     customers = serializers.SerializerMethodField()
     amenities = serializers.SerializerMethodField()
     payments = serializers.SerializerMethodField()
     nc_status = serializers.SerializerMethodField()
     vehicles = StayVehicleSerializer(many=True, read_only=True)
+    food_orders = FoodOrderSerializer(many=True, read_only=True)
 
     class Meta(StayLogSerializer.Meta):
-        fields = StayLogSerializer.Meta.fields + ['is_nc', 'customers', 'amenities', 'payments', 'nc_status', 'vehicles']
+        fields = StayLogSerializer.Meta.fields + ['is_nc', 'customers', 'amenities', 'payments', 'nc_status', 'vehicles', 'food_orders']
 
     def get_customers(self, obj):
         return [

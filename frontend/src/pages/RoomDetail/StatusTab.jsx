@@ -2,14 +2,14 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Card, Button, Badge, Stack, Group, Text, Loader,
   NumberInput, TextInput, Select, Modal, Alert, ActionIcon, Textarea, SegmentedControl,
-  Grid, Paper, Divider, Switch, Table,
+  Grid, Paper, Divider, Switch, Table, Checkbox, Anchor, Tooltip, FileInput,
 } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
 import { useForm } from '@mantine/form';
 import { useDisclosure } from '@mantine/hooks';
 import { modals } from '@mantine/modals';
 import {
-  IconPackage, IconTrash, IconBan, IconUserPlus, IconInfoCircle,
+  IconPackage, IconTrash, IconBan, IconUserPlus, IconInfoCircle, IconToolsKitchen2, IconEye, IconPaperclip,
 } from '@tabler/icons-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
@@ -18,6 +18,7 @@ import {
   QUERY_KEYS, QUERY_KEYS_OPS,
   fetchGroupCustomers, fetchConfigurations, fetchCountryCodes, fetchAmenities, fetchPriceChart, searchCustomers, fetchPaymentMethods,
   addStayVehicle, deleteStayVehicle,
+  addFoodOrder, updateFoodOrder, deleteFoodOrder, addFoodOrderReceipt, deleteFoodOrderReceipt,
 } from '../../api/queries';
 import { compressImage } from '../../utils/imageUtils';
 import CustomerSelectWithAdd from '../../components/CustomerSelectWithAdd';
@@ -371,6 +372,19 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
 
   const [newVehicleText, setNewVehicleText] = useState('');
 
+  // Food orders state
+  const [foodOpened, { open: openFood, close: closeFood }] = useDisclosure(false);
+  const [foodDesc, setFoodDesc] = useState('');
+  const [foodAmount, setFoodAmount] = useState(0);
+  const [foodGstInclusive, setFoodGstInclusive] = useState(true);
+  const [foodPaidNow, setFoodPaidNow] = useState(false);
+  const [foodPaymentMethod, setFoodPaymentMethod] = useState(null);
+  const [foodFiles, setFoodFiles] = useState([]);
+  const [foodError, setFoodError] = useState(null);
+  const [foodSubmitting, setFoodSubmitting] = useState(false);
+  // Mark-paid inline state: orderId → paymentMethod select value
+  const [markPaidMethod, setMarkPaidMethod] = useState({});
+
   const addVehicleMutation = useMutation({
     mutationFn: ({ logId, vehicleNumber }) => addStayVehicle(logId, vehicleNumber),
     onSuccess: () => {
@@ -390,6 +404,54 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
     onError: (e) => notifyError(parseApiError(e, 'Failed to remove vehicle.')),
   });
 
+  const deleteFoodOrderMutation = useMutation({
+    mutationFn: (id) => deleteFoodOrder(id),
+    onSuccess: () => { qc.invalidateQueries(QUERY_KEYS.activeLogs); notifySuccess('Food order removed.'); },
+    onError: (e) => notifyError(parseApiError(e, 'Failed to remove food order.')),
+  });
+
+  const markFoodPaidMutation = useMutation({
+    mutationFn: ({ id, payment_method }) => updateFoodOrder(id, { is_paid: true, payment_method }),
+    onSuccess: () => {
+      qc.invalidateQueries(QUERY_KEYS.activeLogs);
+      setMarkPaidMethod({});
+      notifySuccess('Food order marked as paid.');
+    },
+    onError: (e) => notifyError(parseApiError(e, 'Failed to mark paid.')),
+  });
+
+  const handleAddFoodOrder = async () => {
+    if (!foodDesc.trim()) { setFoodError('Description is required.'); return; }
+    if (!foodAmount) { setFoodError('Amount is required.'); return; }
+    setFoodError(null);
+    setFoodSubmitting(true);
+    try {
+      const order = await addFoodOrder(activeLog?.id, {
+        description: foodDesc.trim(),
+        amount: foodAmount,
+        food_gst_inclusive: foodGstInclusive,
+        is_paid: foodPaidNow,
+        payment_method: foodPaidNow && foodPaymentMethod ? Number(foodPaymentMethod) : null,
+      });
+      if (foodFiles.length > 0) {
+        const processed = await Promise.all(foodFiles.map(f =>
+          f.type.startsWith('image/') ? compressImage(f) : Promise.resolve(f)
+        ));
+        await addFoodOrderReceipt(order.id, processed).catch(() => {
+          notifyError('Order saved but receipt upload failed.');
+        });
+      }
+      qc.invalidateQueries(QUERY_KEYS.activeLogs);
+      closeFood();
+      setFoodDesc(''); setFoodAmount(0); setFoodGstInclusive(true); setFoodPaidNow(false); setFoodPaymentMethod(null); setFoodFiles([]);
+      notifySuccess('Food order added.');
+    } catch (e) {
+      setFoodError(parseApiError(e, 'Failed to add food order.'));
+    } finally {
+      setFoodSubmitting(false);
+    }
+  };
+
   // ── Occupied view ──
   if (activeLog) {
     const nights = Math.max(1, dayjs().diff(dayjs(activeLog.check_in), 'day'));
@@ -400,6 +462,13 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
     const overtimeFee = computeOvertimeFee(activeLog);
     const gstAmount = computeGst(activeLog, nights, configMap['gst_percent']);
     const totalCost = activeLog.is_nc ? 0 : (activeLog.gst_inclusive ? (roomCost + amenityCost + overtimeFee) : (roomCost + amenityCost + overtimeFee + gstAmount));
+    const foodOrders = activeLog.food_orders || [];
+    const gstPct = Number(configMap['gst_percent'] ?? 0) / 100;
+    const foodEffective = (o) => Number(o.amount) + (o.food_gst_inclusive ? 0 : Math.round(Number(o.amount) * gstPct));
+    const totalFood = foodOrders.reduce((s, o) => s + foodEffective(o), 0);
+    const foodGst = foodOrders.filter(o => !o.food_gst_inclusive).reduce((s, o) => s + Math.round(Number(o.amount) * gstPct), 0);
+    const paidFood = foodOrders.filter(o => o.is_paid).reduce((s, o) => s + foodEffective(o), 0);
+    const unpaidFood = totalFood - paidFood;
     const maxBeds = room.beds + activeLog.extra_bed;
     const currentGuestCount = currentGuests.length;
     const canAddGuest = currentGuestCount < maxBeds;
@@ -420,6 +489,7 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
           <Stack gap={0} style={{ minWidth: 300, flex: '0 1 400px' }}>
             {(() => {
               const totalPaid = (activeLog.payments || []).reduce((s, p) => s + Number(p.amount), 0);
+              const balanceDue = totalCost + unpaidFood - totalPaid;
               return (
                 <>
                   <DescRow label="Check-In" value={dayjs(activeLog.check_in).format('DD MMM YYYY, hh:mm A')} />
@@ -443,7 +513,16 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
                   )}
                   <DescRow label="Total Cost" value={`₹${totalCost}`} />
                   <DescRow label="Advance Paid" value={`₹${totalPaid}`} />
-                  <DescRow label="Balance Due" value={`₹${Math.max(0, totalCost - totalPaid)}`} highlight={totalCost - totalPaid > 0} />
+                  {totalFood > 0 && (
+                    <DescRow label="Food Orders" value={`₹${totalFood}`} />
+                  )}
+                  {foodGst > 0 && (
+                    <DescRow label={`Food GST (${configMap['gst_percent']}%)`} value={`₹${foodGst}`} />
+                  )}
+                  {paidFood > 0 && (
+                    <DescRow label="Food Paid" value={`₹${paidFood}`} />
+                  )}
+                  <DescRow label="Balance Due" value={`₹${Math.max(0, balanceDue)}`} highlight={balanceDue > 0} />
                   {(activeLog.male_count > 0 || activeLog.female_count > 0 || activeLog.child_count > 0) && (
                     <DescRow label="Occupants" value={[
                       activeLog.male_count > 0 ? `${activeLog.male_count}M` : null,
@@ -534,6 +613,15 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
           <Button size="xs" variant="light" leftSection={<IconPackage size={14} />} onClick={() => { setNewAmenityId(null); setNewAmenityQty(1); openAmenity(); }}>
             Amenities
           </Button>
+          <Button size="xs" variant="light" color="orange" leftSection={<IconToolsKitchen2 size={14} />}
+            onClick={() => {
+              const existing = activeLog.food_orders || [];
+              setFoodDesc(''); setFoodAmount(0);
+              setFoodGstInclusive(existing.length > 0 ? existing[0].food_gst_inclusive : true);
+              setFoodPaidNow(false); setFoodPaymentMethod(null); setFoodFiles([]); setFoodError(null); openFood();
+            }}>
+            Add Food
+          </Button>
           <Button size="xs" variant="light" color="blue" onClick={openExtend}>
             Extend Stay
           </Button>
@@ -566,10 +654,152 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
             </Group>
           </div>
         )}
+        {foodOrders.length > 0 && (
+          <div>
+            <Text size="sm" fw={500} mb="xs">Food Orders:</Text>
+            <Table withTableBorder withColumnBorders>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th style={{ width: 32 }}>#</Table.Th>
+                  <Table.Th>Description</Table.Th>
+                  <Table.Th style={{ width: 80 }}>Amount</Table.Th>
+                  <Table.Th style={{ width: 90 }}>Status</Table.Th>
+                  <Table.Th style={{ width: 80 }}>Receipts</Table.Th>
+                  <Table.Th style={{ width: 180 }}>Action</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {foodOrders.map((o, i) => (
+                  <Table.Tr key={o.id}>
+                    <Table.Td><Text size="sm" c="dimmed">{i + 1}</Text></Table.Td>
+                    <Table.Td><Text size="sm">{o.description}</Text></Table.Td>
+                    <Table.Td><Text size="sm">₹{o.amount}</Text></Table.Td>
+                    <Table.Td>
+                      <Badge color={o.is_paid ? 'teal' : 'orange'} variant="light" size="sm">
+                        {o.is_paid ? 'Paid' : 'Unpaid'}
+                      </Badge>
+                    </Table.Td>
+                    <Table.Td>
+                      {o.receipts && o.receipts.length > 0 ? (
+                        <Group gap={4}>
+                          {o.receipts.map((r, ri) => (
+                            <Tooltip key={r.id} label={r.file.split('/').pop()}>
+                              <Anchor href={r.file} target="_blank" rel="noopener noreferrer">
+                                <ActionIcon size="sm" variant="light" color="blue">
+                                  <IconEye size={12} />
+                                </ActionIcon>
+                              </Anchor>
+                            </Tooltip>
+                          ))}
+                          <Badge size="xs" variant="light" color="gray" leftSection={<IconPaperclip size={9} />}>
+                            {o.receipts.length}
+                          </Badge>
+                        </Group>
+                      ) : <Text size="xs" c="dimmed">—</Text>}
+                    </Table.Td>
+                    <Table.Td>
+                      {!o.is_paid ? (
+                        <Group gap="xs" wrap="nowrap">
+                          <Select
+                            size="xs"
+                            placeholder="Method"
+                            data={paymentMethods.filter(p => p.is_active).map(p => ({ value: String(p.id), label: p.name }))}
+                            value={markPaidMethod[o.id] || null}
+                            onChange={(v) => setMarkPaidMethod(prev => ({ ...prev, [o.id]: v }))}
+                            style={{ width: 100 }}
+                          />
+                          <Button size="xs" variant="light" color="teal"
+                            disabled={!markPaidMethod[o.id]}
+                            loading={markFoodPaidMutation.isPending}
+                            onClick={() => markFoodPaidMutation.mutate({ id: o.id, payment_method: Number(markPaidMethod[o.id]) })}>
+                            Mark Paid
+                          </Button>
+                          <ActionIcon size="sm" color="red" variant="light"
+                            loading={deleteFoodOrderMutation.isPending}
+                            onClick={() => deleteFoodOrderMutation.mutate(o.id)}>
+                            <IconTrash size={12} />
+                          </ActionIcon>
+                        </Group>
+                      ) : (
+                        <Group gap="xs">
+                          <Text size="xs" c="dimmed">{o.payment_method_name || '—'}</Text>
+                          <ActionIcon size="sm" color="red" variant="light"
+                            loading={deleteFoodOrderMutation.isPending}
+                            onClick={() => deleteFoodOrderMutation.mutate(o.id)}>
+                            <IconTrash size={12} />
+                          </ActionIcon>
+                        </Group>
+                      )}
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </div>
+        )}
+
         <div>
           <Text size="sm" fw={500} mb="xs">Guests:</Text>
           <CustomerTable groupId={activeLog.group} allowRemove />
         </div>
+
+        {/* Food Order Modal */}
+        <Modal opened={foodOpened} onClose={closeFood} title="Add Food Order">
+          <Stack gap="sm">
+            <TextInput
+              label="Description" placeholder="e.g. Breakfast x2, Room Service"
+              required value={foodDesc} onChange={(e) => setFoodDesc(e.currentTarget.value)}
+            />
+            <NumberInput
+              label="Amount (₹)" min={1} required value={foodAmount} onChange={setFoodAmount}
+            />
+            <SegmentedControl
+              value={foodGstInclusive ? 'inclusive' : 'exclusive'}
+              onChange={(v) => setFoodGstInclusive(v === 'inclusive')}
+              data={[
+                { label: 'GST Inclusive', value: 'inclusive' },
+                { label: 'GST Exclusive', value: 'exclusive' },
+              ]}
+              fullWidth
+              disabled={(activeLog.food_orders || []).length > 0}
+            />
+            {(activeLog.food_orders || []).length > 0 && (
+              <Text size="xs" c="dimmed">GST mode is locked by the first food order for this stay.</Text>
+            )}
+            {!foodGstInclusive && foodAmount > 0 && (
+              <Text size="xs" c="teal">
+                + GST ({configMap['gst_percent']}%) = ₹{Math.round(foodAmount * Number(configMap['gst_percent'] ?? 0) / 100)} → Total ₹{foodAmount + Math.round(foodAmount * Number(configMap['gst_percent'] ?? 0) / 100)}
+              </Text>
+            )}
+            <Checkbox
+              label="Paid now"
+              checked={foodPaidNow}
+              onChange={(e) => setFoodPaidNow(e.currentTarget.checked)}
+            />
+            {foodPaidNow && (
+              <Select
+                label="Payment Method"
+                required
+                data={paymentMethods.filter(p => p.is_active).map(p => ({ value: String(p.id), label: p.name }))}
+                value={foodPaymentMethod}
+                onChange={setFoodPaymentMethod}
+              />
+            )}
+            <FileInput
+              label="Attach Receipts (optional)"
+              placeholder="PDF or image files"
+              multiple
+              accept="application/pdf,image/*"
+              value={foodFiles}
+              onChange={setFoodFiles}
+            />
+            {foodError && <Alert color="red">{foodError}</Alert>}
+            <Group justify="flex-end">
+              <Button variant="default" onClick={closeFood}>Cancel</Button>
+              <Button loading={foodSubmitting} onClick={handleAddFoodOrder}>Save</Button>
+            </Group>
+          </Stack>
+        </Modal>
 
         {/* Edit Beds Modal */}
         <Modal opened={bedsOpened} onClose={closeBeds} title="Edit Beds">

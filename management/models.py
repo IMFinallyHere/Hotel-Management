@@ -233,3 +233,21 @@ class ExpenseAttachment(models.Model):
 class StayVehicle(models.Model):
     stay = models.ForeignKey(RoomStayLogs, models.CASCADE, related_name='vehicles')
     vehicle_number = models.CharField(max_length=20)
+
+
+class FoodOrder(models.Model):
+    stay_log = models.ForeignKey(RoomStayLogs, models.CASCADE, related_name='food_orders')
+    description = models.CharField(max_length=200)
+    amount = models.DecimalField(max_digits=8, decimal_places=0)
+    is_paid = models.BooleanField(default=False)
+    food_gst_inclusive = models.BooleanField(default=True)
+    payment_method = models.ForeignKey(PaymentMethod, models.SET_NULL, null=True, blank=True, related_name='food_payments')
+    paid_by = models.ForeignKey(User, models.SET_NULL, null=True, blank=True, related_name='food_orders_paid')
+    ordered_by = models.ForeignKey(User, models.SET_NULL, null=True, blank=True, related_name='food_orders_taken')
+    ordered_at = models.DateTimeField(auto_now_add=True)
+
+
+class FoodOrderReceipt(models.Model):
+    food_order = models.ForeignKey(FoodOrder, models.CASCADE, related_name='receipts')
+    file = models.FileField(upload_to='food_receipts/', validators=[FileExtensionValidator(allowed_extensions=['pdf', 'jpeg', 'jpg', 'png']), validate_file_size])
+    uploaded_on = models.DateTimeField(auto_now_add=True)
