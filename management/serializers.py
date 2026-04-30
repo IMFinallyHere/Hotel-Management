@@ -3,7 +3,7 @@ from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, RoomsPriceChart, Reservation, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, ExpenseAttachment, RoomStatusLog, PaymentMethod, StayVehicle, FoodOrder, FoodOrderReceipt
+from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, RoomsPriceChart, Reservation, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, ExpenseAttachment, RoomStatusLog, PaymentMethod, StayVehicle, FoodOrder, FoodOrderReceipt, CancellationLog
 
 
 class RoomTypeSerializer(serializers.ModelSerializer):
@@ -15,7 +15,7 @@ class RoomTypeSerializer(serializers.ModelSerializer):
 class RoomSerializer(serializers.ModelSerializer):
     class Meta:
         model = Rooms
-        fields = ['id', 'room_number', 'room_type', 'beds', 'price', 'is_ac', 'status']
+        fields = ['id', 'room_number', 'room_type', 'beds', 'price', 'is_ac', 'status', 'cancellation_fee', 'overtime_fee']
 
 
 class RoomStatusLogSerializer(serializers.ModelSerializer):
@@ -110,6 +110,7 @@ class CheckinSerializer(serializers.ModelSerializer):
 
 class StayLogSerializer(serializers.ModelSerializer):
     checked_in_by_name = serializers.SerializerMethodField()
+    checked_out_by_name = serializers.SerializerMethodField()
 
     def get_checked_in_by_name(self, obj):
         u = obj.checked_in_by
@@ -117,11 +118,19 @@ class StayLogSerializer(serializers.ModelSerializer):
             return None
         return u.get_full_name() or u.username
 
+    def get_checked_out_by_name(self, obj):
+        u = obj.checked_out_by
+        if not u:
+            return None
+        return u.get_full_name() or u.username
+
     class Meta:
         model = RoomStayLogs
         fields = ['id', 'room', 'group', 'check_in', 'check_out', 'price', 'extra_bed', 'extra_per_bed_price', 'is_nc',
-                  'expected_checkout', 'overtime_rate', 'grace_until', 'is_early_checkin', 'gst_applied', 'gst_inclusive',
-                  'shifted_from', 'shift_reason', 'is_ac', 'checked_in_by_name', 'male_count', 'female_count', 'child_count']
+                  'expected_checkout', 'overtime_rate', 'overtime_fee_charged', 'overtime_fee_default',
+                  'grace_until', 'is_early_checkin', 'gst_applied', 'gst_inclusive',
+                  'shifted_from', 'shift_reason', 'is_ac', 'checked_in_by_name', 'checked_out_by_name',
+                  'male_count', 'female_count', 'child_count']
 
 
 class StayLogUpdateSerializer(serializers.ModelSerializer):
@@ -175,7 +184,7 @@ class ReservationSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Reservation
-        fields = ['id', 'room', 'room_number', 'group', 'customers', 'check_in_date', 'check_out_date', 'price', 'advance_amount', 'advance_payment_method', 'advance_payment_method_name', 'created_on', 'reminders']
+        fields = ['id', 'room', 'room_number', 'group', 'customers', 'check_in_date', 'check_out_date', 'price', 'advance_amount', 'advance_payment_method', 'advance_payment_method_name', 'created_on', 'reminders', 'is_cancelled']
 
     def validate(self, attrs):
         check_in = attrs.get('check_in_date')
@@ -416,3 +425,40 @@ class ShiftRoomSerializer(serializers.Serializer):
     extra_bed = serializers.IntegerField(min_value=0, required=False)
     extra_per_bed_price = serializers.DecimalField(max_digits=7, decimal_places=0, required=False)
     price = serializers.DecimalField(max_digits=7, decimal_places=0, required=False)
+
+
+class CancellationLogSerializer(serializers.ModelSerializer):
+    cancelled_by_name = serializers.SerializerMethodField()
+    guest_names = serializers.SerializerMethodField()
+    check_in_date = serializers.SerializerMethodField()
+
+    waived_amount = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CancellationLog
+        fields = [
+            'id', 'cancellation_type', 'room_number', 'guest_names', 'reason',
+            'default_fee', 'cancellation_fee', 'waived_amount',
+            'cancelled_by_name', 'cancelled_on',
+            'stay_log', 'reservation', 'check_in_date',
+        ]
+
+    def get_waived_amount(self, obj):
+        return max(0, int(obj.default_fee) - int(obj.cancellation_fee))
+
+    def get_cancelled_by_name(self, obj):
+        if obj.cancelled_by:
+            return obj.cancelled_by.get_full_name() or obj.cancelled_by.username
+        return None
+
+    def get_guest_names(self, obj):
+        if obj.group:
+            return [cg.customer.name for cg in obj.group.customers.select_related('customer').all()]
+        return []
+
+    def get_check_in_date(self, obj):
+        if obj.stay_log:
+            return str(obj.stay_log.check_in.date())
+        if obj.reservation:
+            return str(obj.reservation.check_in_date)
+        return None

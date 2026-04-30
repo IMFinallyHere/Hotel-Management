@@ -186,6 +186,7 @@ export default function InvoiceDocument({ log, roomNumber, roomTypeName, configM
     total: Number(a.price) * a.quantity * (a.charge_type === 'per_night' ? nights : 1),
   }));
   const amenityTotal = amenityRows.reduce((sum, a) => sum + a.total, 0);
+  const overtimeFeeCharged = Number(log.overtime_fee_charged ?? 0);
   const baseSubtotal = log.is_nc ? 0 : (roomChargeTotal + extraBedTotal + amenityTotal);
 
   // Food orders (excluded from room GST base)
@@ -210,7 +211,7 @@ export default function InvoiceDocument({ log, roomNumber, roomTypeName, configM
     }
   }
 
-  const roomTotal  = log.is_nc ? 0 : (log.gst_inclusive ? baseSubtotal : baseSubtotal + gstAmount);
+  const roomTotal  = log.is_nc ? 0 : (log.gst_inclusive ? baseSubtotal : baseSubtotal + gstAmount) + overtimeFeeCharged;
   const grandTotal = log.is_nc ? 0 : (roomTotal + foodTotal);
   const totalPaid  = (log.payments || []).reduce((s, p) => s + Number(p.amount), 0);
   const balance    = grandTotal - totalPaid - paidFoodTotal;
@@ -235,6 +236,12 @@ export default function InvoiceDocument({ log, roomNumber, roomTypeName, configM
       rate: fmt(a.rate),
       amount: fmt(a.total),
     })),
+    ...(overtimeFeeCharged > 0 ? [{
+      qty: '1',
+      desc: 'Overtime Fee',
+      rate: fmt(overtimeFeeCharged),
+      amount: fmt(overtimeFeeCharged),
+    }] : []),
   ];
 
   return (
@@ -327,7 +334,7 @@ export default function InvoiceDocument({ log, roomNumber, roomTypeName, configM
             ))
           )}
 
-          {/* Summary: subtotal (room only) */}
+          {/* Summary: subtotal (room + amenities) */}
           {!log.is_nc ? (
             <SRow label="Subtotal" value={fmt(subtotal)} />
           ) : null}
@@ -335,6 +342,11 @@ export default function InvoiceDocument({ log, roomNumber, roomTypeName, configM
           {/* Summary: GST (on room/amenities only) */}
           {!log.is_nc && gstAmount > 0 ? (
             <SRow label={gstLabel} value={fmt(gstAmount)} />
+          ) : null}
+
+          {/* Summary: Overtime fee (if charged) */}
+          {!log.is_nc && overtimeFeeCharged > 0 ? (
+            <SRow label="Overtime Fee" value={fmt(overtimeFeeCharged)} />
           ) : null}
 
           {/* Summary: Food (incl. GST) */}

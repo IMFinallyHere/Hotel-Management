@@ -1,10 +1,10 @@
 import { useState, useCallback } from 'react';
 import {
   Stack, Text, Group, TextInput, Button, Badge, Table, ActionIcon,
-  Loader, Center, Paper, Select, Pagination, Tooltip,
+  Loader, Center, Paper, Select, Pagination, Tooltip, Modal, Textarea, NumberInput,
 } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
-import { IconSearch, IconX, IconDoor, IconTrash, IconArrowRight } from '@tabler/icons-react';
+import { IconSearch, IconX, IconDoor, IconBan, IconArrowRight } from '@tabler/icons-react';
 import { useDisclosure } from '@mantine/hooks';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
@@ -46,10 +46,16 @@ export default function Reservations() {
   const [convertRoom, setConvertRoom] = useState(null);
   const [convertOpened, { open: openConvert, close: closeConvert }] = useDisclosure(false);
 
+  const [cancelTarget, setCancelTarget] = useState(null);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelFee, setCancelFee] = useState(0);
+  const [cancelOpened, { open: openCancel, close: closeCancel }] = useDisclosure(false);
+  const [showCancelled, setShowCancelled] = useState(false);
+
   // Active filters — only applied when user hits Search or on mount
   const [activeParams, setActiveParams] = useState({ status: 'upcoming' });
 
-  const { data: reservations = [], isFetching } = useQuery({
+  const { data: reservationsRaw = [], isFetching } = useQuery({
     queryKey: ['reservations-search', activeParams],
     queryFn: () => {
       const p = { ...activeParams };
@@ -62,11 +68,16 @@ export default function Reservations() {
     keepPreviousData: true,
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: (id) => api.delete(`/v1/reservation/${id}/`),
+  const reservations = showCancelled ? reservationsRaw : reservationsRaw.filter(r => !r.is_cancelled);
+
+  const cancelMutation = useMutation({
+    mutationFn: ({ id, reason, cancellation_fee }) =>
+      api.post(`/v1/reservation/${id}/cancel/`, { reason, cancellation_fee }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['reservations-search'] });
       qc.invalidateQueries({ queryKey: ['reservations'] });
+      closeCancel();
+      setCancelReason('');
       notifySuccess('Reservation cancelled.');
     },
     onError: (e) => notifyError(parseApiError(e, 'Failed to cancel reservation.')),
@@ -93,7 +104,7 @@ export default function Reservations() {
   const paged = reservations.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const totalPages = Math.ceil(reservations.length / PAGE_SIZE);
 
-  const canDelete = permissions.delete_reservation || permissions.is_superuser;
+  const canCancel = permissions.delete_reservation || permissions.is_superuser;
   const canConvert = permissions.add_roomstaylogs || permissions.is_superuser;
 
   const { data: rooms = [] } = useQuery({ queryKey: QUERY_KEYS.rooms, queryFn: fetchRooms });
@@ -164,6 +175,15 @@ export default function Reservations() {
             <Group gap="xs" mt={20}>
               <Button onClick={handleSearch} leftSection={<IconSearch size={14} />}>Search</Button>
               <Button variant="default" onClick={handleClear} leftSection={<IconX size={14} />}>Clear</Button>
+              <Button
+                variant={showCancelled ? 'filled' : 'outline'}
+                color="gray"
+                size="sm"
+                mt={0}
+                onClick={() => setShowCancelled(v => !v)}
+              >
+                {showCancelled ? 'Hide Cancelled' : 'Show Cancelled'}
+              </Button>
             </Group>
           </Group>
         </Stack>
@@ -198,8 +218,9 @@ export default function Reservations() {
                 const nights = coDate.diff(ciDate, 'day');
                 const isPast = r.check_out_date < today;
                 const isToday = r.check_in_date === today;
-                const statusLabel = isPast ? 'Past' : isToday ? 'Today' : 'Upcoming';
-                const statusColor = isPast ? 'gray' : isToday ? 'orange' : 'teal';
+                const isCancelled = r.is_cancelled;
+                const statusLabel = isCancelled ? 'Cancelled' : isPast ? 'Past' : isToday ? 'Today' : 'Upcoming';
+                const statusColor = isCancelled ? 'red' : isPast ? 'gray' : isToday ? 'orange' : 'teal';
                 return (
                   <Table.Tr key={r.id}>
                     <Table.Td fw={600}>{r.room_number ?? r.room}</Table.Td>
@@ -234,7 +255,7 @@ export default function Reservations() {
                             <IconDoor size={14} />
                           </ActionIcon>
                         </Tooltip>
-                        {canConvert && !isPast && (
+                        {canConvert && !isPast && !isCancelled && (
                           <Tooltip label="Convert to check-in">
                             <ActionIcon
                               size="sm" variant="subtle" color="blue"
@@ -244,14 +265,19 @@ export default function Reservations() {
                             </ActionIcon>
                           </Tooltip>
                         )}
-                        {canDelete && !isPast && (
+                        {canCancel && !isCancelled && (
                           <Tooltip label="Cancel reservation">
                             <ActionIcon
                               size="sm" variant="subtle" color="red"
-                              loading={deleteMutation.isPending}
-                              onClick={() => deleteMutation.mutate(r.id)}
+                              onClick={() => {
+                                setCancelTarget(r);
+                                setCancelReason('');
+                                const roomData = rooms.find(rm => rm.id === r.room);
+                                setCancelFee(Number(roomData?.cancellation_fee ?? 0));
+                                openCancel();
+                              }}
                             >
-                              <IconTrash size={14} />
+                              <IconBan size={14} />
                             </ActionIcon>
                           </Tooltip>
                         )}
@@ -275,6 +301,46 @@ export default function Reservations() {
           room={convertRoom}
         />
       )}
+
+      <Modal opened={cancelOpened} onClose={closeCancel} title="Cancel Reservation">
+        {cancelTarget && (
+          <Text size="sm" c="dimmed" mb="sm">
+            Room {cancelTarget.room_number} · {dayjs(cancelTarget.check_in_date).format('DD MMM')} – {dayjs(cancelTarget.check_out_date).format('DD MMM YYYY')}
+          </Text>
+        )}
+        <Textarea
+          label="Reason for Cancellation"
+          placeholder="Enter reason..."
+          value={cancelReason}
+          onChange={(e) => setCancelReason(e.currentTarget.value)}
+          rows={3}
+          mb="sm"
+          required
+        />
+        <NumberInput
+          label="Cancellation Fee (₹)"
+          description="Leave at 0 to waive."
+          min={0}
+          value={cancelFee}
+          onChange={setCancelFee}
+          mb="md"
+        />
+        <Group justify="flex-end">
+          <Button variant="default" onClick={closeCancel}>Back</Button>
+          <Button
+            color="red"
+            disabled={!cancelReason.trim()}
+            loading={cancelMutation.isPending}
+            onClick={() => cancelMutation.mutate({
+              id: cancelTarget.id,
+              reason: cancelReason,
+              cancellation_fee: cancelFee,
+            })}
+          >
+            Confirm Cancellation
+          </Button>
+        </Group>
+      </Modal>
     </Stack>
   );
 }

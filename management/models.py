@@ -61,6 +61,8 @@ class Rooms(models.Model):
     price = models.DecimalField(max_digits=7, decimal_places=0)  # default price
     is_ac = models.BooleanField(default=False)
     status = models.CharField(choices=ROOM_STATUS, max_length=15, default='available')
+    cancellation_fee = models.DecimalField(max_digits=7, decimal_places=0, default=0)
+    overtime_fee = models.DecimalField(max_digits=7, decimal_places=0, default=0)
 
     def is_occupied(self) -> bool:
         return self.logs.filter(check_out=None).exists()
@@ -98,6 +100,9 @@ class RoomStayLogs(models.Model):
     is_nc = models.BooleanField(default=False)
     expected_checkout = models.DateTimeField(null=True, blank=True)
     overtime_rate = models.DecimalField(max_digits=7, decimal_places=0, null=True, blank=True)
+    overtime_fee_charged = models.DecimalField(max_digits=7, decimal_places=0, null=True, blank=True)
+    overtime_fee_default = models.DecimalField(max_digits=7, decimal_places=0, null=True, blank=True)
+    checked_out_by = models.ForeignKey(User, models.SET_NULL, null=True, blank=True, related_name='checkouts')
     grace_until = models.DateTimeField(null=True, blank=True)
     is_early_checkin = models.BooleanField(default=False)
     gst_applied = models.BooleanField(default=False)
@@ -134,6 +139,7 @@ class Reservation(models.Model):
     advance_amount = models.DecimalField(max_digits=7, decimal_places=0, default=0)
     advance_payment_method = models.ForeignKey(PaymentMethod, models.SET_NULL, null=True, blank=True, related_name='reservations')
     created_on = models.DateTimeField(auto_now_add=True)
+    is_cancelled = models.BooleanField(default=False)
 
 
 class ReservationReminder(models.Model):
@@ -180,6 +186,7 @@ class ReportPermissions(models.Model):
             ('view_staff_sales_report', 'Can view staff sales report'),
             ('view_cash_reconciliation', 'Can view cash reconciliation'),
             ('view_expense_report', 'Can view expense report'),
+            ('view_cancellation_report', 'Can view cancellation report'),
         ]
 
 
@@ -251,3 +258,18 @@ class FoodOrderReceipt(models.Model):
     food_order = models.ForeignKey(FoodOrder, models.CASCADE, related_name='receipts')
     file = models.FileField(upload_to='food_receipts/', validators=[FileExtensionValidator(allowed_extensions=['pdf', 'jpeg', 'jpg', 'png']), validate_file_size])
     uploaded_on = models.DateTimeField(auto_now_add=True)
+
+
+class CancellationLog(models.Model):
+    TYPE_CHOICES = [('checkin', 'Check-in'), ('reservation', 'Reservation')]
+    cancellation_type = models.CharField(max_length=15, choices=TYPE_CHOICES)
+    stay_log = models.ForeignKey(RoomStayLogs, models.SET_NULL, null=True, blank=True, related_name='cancellations')
+    reservation = models.ForeignKey(Reservation, models.SET_NULL, null=True, blank=True, related_name='cancellations')
+    room = models.ForeignKey(Rooms, models.SET_NULL, null=True, related_name='cancellation_logs')
+    room_number = models.CharField(max_length=10)
+    group = models.ForeignKey(Group, models.SET_NULL, null=True, blank=True, related_name='cancellations')
+    reason = models.TextField()
+    default_fee = models.DecimalField(max_digits=7, decimal_places=0, default=0)
+    cancellation_fee = models.DecimalField(max_digits=7, decimal_places=0, default=0)
+    cancelled_by = models.ForeignKey(User, models.SET_NULL, null=True, related_name='cancellations_made')
+    cancelled_on = models.DateTimeField(auto_now_add=True)

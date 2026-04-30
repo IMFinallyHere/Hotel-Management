@@ -9,8 +9,8 @@ from django.db.models import Q, Count
 from django.db.models import ProtectedError
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, Group, CustomerGroup, RoomsPriceChart, Reservation, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, ExpenseAttachment, RoomStatusLog, PaymentMethod, StayVehicle, FoodOrder, FoodOrderReceipt
-from .serializers import RoomSerializer, RoomTypeSerializer, CountryCodeSerializer, CustomerSerializer, ConfigurationSerializer, CheckinSerializer, GroupCustomerSerializer, RoomsPriceChartSerializer, StayLogSerializer, StayLogUpdateSerializer, ReservationSerializer, ReservationReminderSerializer, AmenitySerializer, StayLogAmenitySerializer, ActiveStayLogSerializer, RoomNCRequestSerializer, PaymentSerializer, CashWithdrawalSerializer, ExpenseSerializer, ExpenseAttachmentSerializer, ExtendStaySerializer, GraceSerializer, ShiftRoomSerializer, RoomStatusLogSerializer, PaymentMethodSerializer, StayVehicleSerializer, FoodOrderSerializer, FoodOrderReceiptSerializer
+from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, Group, CustomerGroup, RoomsPriceChart, Reservation, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, ExpenseAttachment, RoomStatusLog, PaymentMethod, StayVehicle, FoodOrder, FoodOrderReceipt, CancellationLog
+from .serializers import RoomSerializer, RoomTypeSerializer, CountryCodeSerializer, CustomerSerializer, ConfigurationSerializer, CheckinSerializer, GroupCustomerSerializer, RoomsPriceChartSerializer, StayLogSerializer, StayLogUpdateSerializer, ReservationSerializer, ReservationReminderSerializer, AmenitySerializer, StayLogAmenitySerializer, ActiveStayLogSerializer, RoomNCRequestSerializer, PaymentSerializer, CashWithdrawalSerializer, ExpenseSerializer, ExpenseAttachmentSerializer, ExtendStaySerializer, GraceSerializer, ShiftRoomSerializer, RoomStatusLogSerializer, PaymentMethodSerializer, StayVehicleSerializer, FoodOrderSerializer, FoodOrderReceiptSerializer, CancellationLogSerializer
 from .permissions import report_permission, HasModelPermission
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.permissions import DjangoModelPermissions
@@ -172,7 +172,16 @@ class Checkout(APIView):
         log = get_object_or_404(RoomStayLogs, pk=pk)
         if log.check_out is not None:
             return Response({'error': 'Room already checked out.'}, status=400)
+        overtime_fee_charged = request.data.get('overtime_fee_charged')
         log.check_out = timezone.now()
+        log.checked_out_by = request.user
+        if overtime_fee_charged is not None:
+            from decimal import InvalidOperation
+            try:
+                log.overtime_fee_charged = Decimal(str(overtime_fee_charged))
+                log.overtime_fee_default = log.room.overtime_fee
+            except InvalidOperation:
+                pass
         log.save()
         room = log.room
         old_status = room.status
@@ -282,6 +291,114 @@ class ReservationDetail(generics.RetrieveUpdateDestroyAPIView):
     queryset = Reservation.objects.all()
     serializer_class = ReservationSerializer
     permission_classes = [DjangoModelPermissions]
+
+
+class CancelCheckin(APIView):
+    permission_classes = [DjangoModelPermissions]
+
+    @staticmethod
+    def get_queryset():
+        return RoomStayLogs.objects.all()
+
+    def post(self, request, pk):
+        log = get_object_or_404(RoomStayLogs, pk=pk)
+        if log.check_out is not None:
+            return Response({'error': 'Stay already ended.'}, status=400)
+        reason = request.data.get('reason', '').strip()
+        if not reason:
+            return Response({'error': 'Reason is required.'}, status=400)
+        from decimal import InvalidOperation
+        room = log.room
+        default_fee = room.cancellation_fee or Decimal('0')
+        raw_fee = request.data.get('cancellation_fee')
+        try:
+            cancellation_fee = Decimal(str(raw_fee)) if raw_fee is not None else default_fee
+        except InvalidOperation:
+            cancellation_fee = default_fee
+
+        log.check_out = timezone.now()
+        log.save()
+        old_status = room.status
+        room.status = 'cleaning'
+        room.save(update_fields=['status'])
+        RoomStatusLog.objects.create(
+            room=room,
+            old_status=old_status,
+            new_status='cleaning',
+            changed_by=request.user,
+            note='Auto-set after cancellation',
+        )
+        CancellationLog.objects.create(
+            cancellation_type='checkin',
+            stay_log=log,
+            room=room,
+            room_number=room.room_number,
+            group=log.group,
+            reason=reason,
+            default_fee=default_fee,
+            cancellation_fee=cancellation_fee,
+            cancelled_by=request.user,
+        )
+        return Response({'success_message': 'Stay cancelled.'})
+
+
+class ReservationCancel(APIView):
+    permission_classes = [DjangoModelPermissions]
+
+    @staticmethod
+    def get_queryset():
+        return Reservation.objects.all()
+
+    def post(self, request, pk):
+        reservation = get_object_or_404(Reservation, pk=pk)
+        if reservation.is_cancelled:
+            return Response({'error': 'Reservation already cancelled.'}, status=400)
+        reason = request.data.get('reason', '').strip()
+        if not reason:
+            return Response({'error': 'Reason is required.'}, status=400)
+        from decimal import InvalidOperation
+        room = reservation.room
+        default_fee = room.cancellation_fee or Decimal('0')
+        raw_fee = request.data.get('cancellation_fee')
+        try:
+            cancellation_fee = Decimal(str(raw_fee)) if raw_fee is not None else default_fee
+        except InvalidOperation:
+            cancellation_fee = default_fee
+
+        reservation.is_cancelled = True
+        reservation.save(update_fields=['is_cancelled'])
+        CancellationLog.objects.create(
+            cancellation_type='reservation',
+            reservation=reservation,
+            room=room,
+            room_number=room.room_number,
+            group=reservation.group,
+            reason=reason,
+            default_fee=default_fee,
+            cancellation_fee=cancellation_fee,
+            cancelled_by=request.user,
+        )
+        return Response({'success_message': 'Reservation cancelled.'})
+
+
+class CancellationReportView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not (request.user.is_superuser or request.user.has_perm('management.view_cancellation_report')):
+            return Response({'error': 'Permission denied.'}, status=403)
+        qs = CancellationLog.objects.select_related(
+            'room', 'group', 'cancelled_by', 'stay_log', 'reservation',
+        ).prefetch_related('group__customers__customer').order_by('-cancelled_on')
+        p = request.query_params
+        if p.get('from_date'):
+            qs = qs.filter(cancelled_on__date__gte=p['from_date'])
+        if p.get('to_date'):
+            qs = qs.filter(cancelled_on__date__lte=p['to_date'])
+        if p.get('cancellation_type') and p['cancellation_type'] != 'all':
+            qs = qs.filter(cancellation_type=p['cancellation_type'])
+        serializer = CancellationLogSerializer(qs, many=True)
+        return Response(serializer.data)
 
 
 class AmenityListCreate(generics.ListCreateAPIView):

@@ -1,7 +1,6 @@
 import { useState } from 'react';
-import { Table, Button, Group, Text } from '@mantine/core';
+import { Table, Button, Group, Text, Modal, Textarea, NumberInput, Badge } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
-import { modals } from '@mantine/modals';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../../api/client';
 import { QUERY_KEYS } from '../../api/queries';
@@ -16,25 +15,26 @@ export default function ReservationsTab({ room, reservations, isOccupied, config
   const qc = useQueryClient();
   const { permissions } = usePermissions();
   const canViewReminders = permissions.view_reservationreminder || permissions.is_superuser;
+  const canCancel = permissions.delete_reservation || permissions.is_superuser;
   const [convertReservation, setConvertReservation] = useState(null);
   const [convertOpened, { open: openConvert, close: closeConvert }] = useDisclosure(false);
 
-  const deleteMutation = useMutation({
-    mutationFn: (id) => api.delete(`/v1/reservation/${id}/`),
+  const [cancelTarget, setCancelTarget] = useState(null);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelFee, setCancelFee] = useState(0);
+  const [cancelOpened, { open: openCancel, close: closeCancel }] = useDisclosure(false);
+
+  const cancelMutation = useMutation({
+    mutationFn: ({ id, reason, cancellation_fee }) =>
+      api.post(`/v1/reservation/${id}/cancel/`, { reason, cancellation_fee }),
     onSuccess: () => {
       qc.invalidateQueries(QUERY_KEYS.roomReservations(room.id));
       qc.invalidateQueries({ queryKey: QUERY_KEYS.reminders });
-      notifySuccess('Reservation deleted.');
+      closeCancel();
+      setCancelReason('');
+      notifySuccess('Reservation cancelled.');
     },
-    onError: (e) => notifyError(parseApiError(e, 'Failed to delete reservation.')),
-  });
-
-  const handleDelete = (id) => modals.openConfirmModal({
-    title: 'Delete reservation',
-    children: <Text size="sm">This action cannot be undone.</Text>,
-    labels: { confirm: 'Delete', cancel: 'Cancel' },
-    confirmProps: { color: 'red' },
-    onConfirm: () => deleteMutation.mutate(id),
+    onError: (e) => notifyError(parseApiError(e, 'Failed to cancel reservation.')),
   });
 
   const handleConvert = (reservation) => {
@@ -49,12 +49,27 @@ export default function ReservationsTab({ room, reservations, isOccupied, config
       <Table.Td>₹{res.price}</Table.Td>
       <Table.Td><CustomerList groupId={res.group} /></Table.Td>
       <Table.Td>
+        {res.is_cancelled && <Badge color="red" size="sm" mr="xs">Cancelled</Badge>}
         <Group gap="xs">
-          {canViewReminders && <ReminderPopover reservation={res} />}
-          {!isOccupied && (
+          {canViewReminders && !res.is_cancelled && <ReminderPopover reservation={res} />}
+          {!isOccupied && !res.is_cancelled && (
             <Button size="xs" variant="light" onClick={() => handleConvert(res)}>Convert</Button>
           )}
-          <Button size="xs" color="red" variant="light" onClick={() => handleDelete(res.id)}>Delete</Button>
+          {canCancel && !res.is_cancelled && (
+            <Button
+              size="xs"
+              color="red"
+              variant="light"
+              onClick={() => {
+                setCancelTarget(res);
+                setCancelReason('');
+                setCancelFee(Number(room.cancellation_fee ?? 0));
+                openCancel();
+              }}
+            >
+              Cancel
+            </Button>
+          )}
         </Group>
       </Table.Td>
     </Table.Tr>
@@ -88,6 +103,46 @@ export default function ReservationsTab({ room, reservations, isOccupied, config
           configMap={configMap}
         />
       )}
+
+      <Modal opened={cancelOpened} onClose={closeCancel} title="Cancel Reservation">
+        {cancelTarget && (
+          <Text size="sm" c="dimmed" mb="sm">
+            {cancelTarget.check_in_date} – {cancelTarget.check_out_date}
+          </Text>
+        )}
+        <Textarea
+          label="Reason for Cancellation"
+          placeholder="Enter reason..."
+          value={cancelReason}
+          onChange={(e) => setCancelReason(e.currentTarget.value)}
+          rows={3}
+          mb="sm"
+          required
+        />
+        <NumberInput
+          label="Cancellation Fee (₹)"
+          description="Leave at 0 to waive."
+          min={0}
+          value={cancelFee}
+          onChange={setCancelFee}
+          mb="md"
+        />
+        <Group justify="flex-end">
+          <Button variant="default" onClick={closeCancel}>Back</Button>
+          <Button
+            color="red"
+            disabled={!cancelReason.trim()}
+            loading={cancelMutation.isPending}
+            onClick={() => cancelMutation.mutate({
+              id: cancelTarget.id,
+              reason: cancelReason,
+              cancellation_fee: cancelFee,
+            })}
+          >
+            Confirm Cancellation
+          </Button>
+        </Group>
+      </Modal>
     </>
   );
 }

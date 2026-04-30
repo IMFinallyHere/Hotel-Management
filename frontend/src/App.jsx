@@ -50,6 +50,7 @@ const History              = lazy(() => import('./pages/History'));
 const GSTReport            = lazy(() => import('./pages/GSTReport'));
 const BulkBooking          = lazy(() => import('./pages/BulkBookingModal'));
 const Reservations         = lazy(() => import('./pages/Reservations'));
+const CancellationReport   = lazy(() => import('./pages/CancellationReport'));
 import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
 import { useState, useEffect } from 'react';
 import usePermissions from './hooks/usePermissions';
@@ -324,6 +325,15 @@ function AppLayout() {
                 leftSection={<IconCalendarEvent size={14} color="rgba(255,255,255,0.6)" />}
                 onClick={() => { navigate('/reports/reservation-fulfillment'); closeNav(); }}
                 active={path === '/reports/reservation-fulfillment'}
+              />
+            )}
+            {(permissions.view_cancellation_report || permissions.is_superuser) && (
+              <NavLink
+                {...NL}
+                label={nl('Cancellations')}
+                leftSection={<IconBan size={14} color="rgba(255,255,255,0.6)" />}
+                onClick={() => { navigate('/reports/cancellations'); closeNav(); }}
+                active={path === '/reports/cancellations'}
               />
             )}
             {permissions.view_clv_report && (
@@ -606,6 +616,7 @@ function AppLayout() {
           <Route path="/finance/expense-report" element={<ExpenseReport />} />
           <Route path="/history" element={<History />} />
           <Route path="/reports/gst" element={<GSTReport />} />
+          <Route path="/reports/cancellations" element={<CancellationReport />} />
           <Route path="/admin/users" element={<UserManagement />} />
           <Route path="/admin/groups" element={<GroupManagement />} />
           <Route path="/admin/permissions" element={<PermissionOverview />} />

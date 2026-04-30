@@ -59,6 +59,7 @@ export const REPORT_QUERY_KEYS = {
   staffSales: (params) => ['staff-sales', params],
   cashReconciliation: (params) => ['cash-reconciliation', params],
   expenseReport: (params) => ['expense-report', params],
+  cancellationReport: (params) => ['cancellation-report', params],
 };
 
 export const fetchUserPermissions = () => api.get('/v1/user/permissions/').then(r => r.data);
@@ -94,6 +95,7 @@ export const fetchCashReconciliation = (params) => api.get('/v1/finance/cash-rec
 export const fetchExpenseReport = (params) => api.get('/v1/finance/expenses/', { params }).then(r => r.data);
 export const fetchStayHistory = (params) => api.get('/v1/stay-logs/history/', { params }).then(r => r.data);
 export const fetchGSTReport = (params) => api.get('/v1/reports/gst/', { params }).then(r => r.data);
+export const fetchCancellationReport = (params) => api.get('/v1/reports/cancellations/', { params }).then(r => r.data);
 export const fetchDueReminders = () => api.get('/v1/reminders/').then(r => r.data);
 
 export const addStayVehicle = (logId, vehicleNumber) =>

@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import {
   Tabs, Button, Badge, Group, Text, Loader, Center,
-  NumberInput, Select, Modal, Divider, Textarea, Checkbox,
+  NumberInput, Select, Modal, Divider, Textarea, Checkbox, Alert,
 } from '@mantine/core';
+import { IconArrowLeft, IconLogout, IconAlertTriangle } from '@tabler/icons-react';
 import { useDisclosure } from '@mantine/hooks';
 import { modals } from '@mantine/modals';
-import { IconArrowLeft, IconLogout } from '@tabler/icons-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
@@ -42,7 +42,7 @@ export default function RoomDetail() {
   const { data: paymentMethods = [] } = useQuery({ queryKey: QUERY_KEYS.paymentMethods, queryFn: () => fetchPaymentMethods() });
 
   const checkoutMutation = useMutation({
-    mutationFn: (logId) => api.post(`/v1/checkout/${logId}/`),
+    mutationFn: ({ logId, overtime_fee_charged }) => api.post(`/v1/checkout/${logId}/`, { overtime_fee_charged }),
     onSuccess: () => {
       qc.invalidateQueries(QUERY_KEYS.activeLogs);
       qc.invalidateQueries(QUERY_KEYS.rooms);
@@ -63,6 +63,13 @@ export default function RoomDetail() {
   const [payCheckoutAmount, setPayCheckoutAmount] = useState(0);
   const [payCheckoutType, setPayCheckoutType] = useState(null);
 
+  const [cancelStayOpened, { open: openCancelStay, close: closeCancelStay }] = useDisclosure(false);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelFee, setCancelFee] = useState(0);
+
+  const [overtimeFeeOpened, { open: openOvertimeFee, close: closeOvertimeFee }] = useDisclosure(false);
+  const [overtimeFeeCharged, setOvertimeFeeCharged] = useState(0);
+
   const shiftMutation = useMutation({
     mutationFn: ({ logId, new_room, reason, price, apply_extra_beds, extra_bed, extra_per_bed_price }) =>
       api.post(`/v1/stay-logs/${logId}/shift/`, { new_room, reason, price, apply_extra_beds, extra_bed, extra_per_bed_price }),
@@ -79,9 +86,9 @@ export default function RoomDetail() {
   });
 
   const payAndCheckoutMutation = useMutation({
-    mutationFn: async ({ logId, payment_method, amount }) => {
+    mutationFn: async ({ logId, payment_method, amount, overtime_fee_charged }) => {
       await api.post(`/v1/stay-logs/${logId}/payments/`, { payment_method, amount, note: 'Collected at checkout' });
-      await api.post(`/v1/checkout/${logId}/`);
+      await api.post(`/v1/checkout/${logId}/`, { overtime_fee_charged });
     },
     onSuccess: () => {
       qc.invalidateQueries(QUERY_KEYS.activeLogs);
@@ -90,6 +97,19 @@ export default function RoomDetail() {
       notifySuccess('Payment recorded and checkout successful.');
     },
     onError: (e) => notifyError(parseApiError(e, 'Pay & checkout failed.')),
+  });
+
+  const cancelStayMutation = useMutation({
+    mutationFn: ({ logId, reason, cancellation_fee }) =>
+      api.post(`/v1/stay-logs/${logId}/cancel/`, { reason, cancellation_fee }),
+    onSuccess: () => {
+      qc.invalidateQueries(QUERY_KEYS.activeLogs);
+      qc.invalidateQueries(QUERY_KEYS.rooms);
+      closeCancelStay();
+      setCancelReason('');
+      notifySuccess('Stay cancelled. Room moved to cleaning.');
+    },
+    onError: (e) => notifyError(parseApiError(e, 'Failed to cancel stay.')),
   });
 
   const markAvailableMutation = useMutation({
@@ -125,12 +145,11 @@ export default function RoomDetail() {
   else if (room.status === 'out_of_order') { statusColor = 'dark'; statusLabel = 'Out of Order'; }
   else if (nextReservation) { statusColor = 'orange'; statusLabel = 'Reserved'; }
 
-  const handleCheckout = () => {
+  const proceedCheckout = (overtimeFee) => {
     const nights = Math.max(1, dayjs().diff(dayjs(activeLog.check_in), 'day'));
     const roomTotal = (Number(activeLog.price) + activeLog.extra_bed * Number(activeLog.extra_per_bed_price)) * nights;
     const amenityTotal = (activeLog.amenities || []).reduce((sum, a) =>
       sum + Number(a.price) * a.quantity * (a.charge_type === 'per_night' ? nights : 1), 0);
-    const overtimeFee = computeOvertimeFee(activeLog);
     const gstAmount = computeGst(activeLog, nights, configMap['gst_percent']);
     const billTotal = activeLog.is_nc ? 0 : (activeLog.gst_inclusive ? (roomTotal + amenityTotal + overtimeFee) : (roomTotal + amenityTotal + overtimeFee + gstAmount));
     const gstPct = Number(configMap['gst_percent'] ?? 0) / 100;
@@ -149,8 +168,17 @@ export default function RoomDetail() {
         children: <Text size="sm">Check out this room?</Text>,
         labels: { confirm: 'Checkout', cancel: 'Cancel' },
         confirmProps: { color: 'red' },
-        onConfirm: () => checkoutMutation.mutate(activeLog.id),
+        onConfirm: () => checkoutMutation.mutate({ logId: activeLog.id, overtime_fee_charged: overtimeFee }),
       });
+    }
+  };
+
+  const handleCheckout = () => {
+    if (isLogOvertime(activeLog) && Number(room.overtime_fee) > 0) {
+      setOvertimeFeeCharged(Number(room.overtime_fee));
+      openOvertimeFee();
+    } else {
+      proceedCheckout(0);
     }
   };
 
@@ -201,6 +229,17 @@ export default function RoomDetail() {
           <Group gap="xs" style={{ marginLeft: 'clamp(16px, 8vw, 130px)' }}>
             <Button variant="outline" color="blue" onClick={handleOpenShift}>
               Shift Room
+            </Button>
+            <Button
+              color="orange"
+              variant="outline"
+              onClick={() => {
+                setCancelReason('');
+                setCancelFee(Number(room.cancellation_fee ?? 0));
+                openCancelStay();
+              }}
+            >
+              Cancel Stay
             </Button>
             <Button color="red" variant="outline" leftSection={<IconLogout size={16} />} onClick={handleCheckout} loading={checkoutMutation.isPending}>
               Checkout
@@ -306,9 +345,76 @@ export default function RoomDetail() {
               logId: activeLog.id,
               payment_method: Number(payCheckoutType),
               amount: payCheckoutAmount,
+              overtime_fee_charged: overtimeFeeCharged,
             })}
           >
             Pay & Checkout
+          </Button>
+        </Group>
+      </Modal>
+
+      {/* Overtime Fee Confirmation Modal */}
+      <Modal opened={overtimeFeeOpened} onClose={closeOvertimeFee} title="Overtime Fee">
+        <Alert icon={<IconAlertTriangle size={16} />} color="yellow" mb="md">
+          This room is overtime. Confirm the overtime fee to charge before proceeding.
+        </Alert>
+        <NumberInput
+          label="Overtime Fee (₹)"
+          description="Set to 0 to waive the fee."
+          min={0}
+          value={overtimeFeeCharged}
+          onChange={setOvertimeFeeCharged}
+          mb="md"
+        />
+        <Group justify="flex-end">
+          <Button variant="default" onClick={closeOvertimeFee}>Cancel</Button>
+          <Button
+            color="red"
+            onClick={() => {
+              closeOvertimeFee();
+              proceedCheckout(overtimeFeeCharged);
+            }}
+          >
+            Proceed to Checkout
+          </Button>
+        </Group>
+      </Modal>
+
+      {/* Cancel Stay Modal */}
+      <Modal opened={cancelStayOpened} onClose={closeCancelStay} title="Cancel Stay">
+        <Alert icon={<IconAlertTriangle size={16} />} color="orange" mb="md">
+          This will cancel the stay and move the room to cleaning.
+        </Alert>
+        <Textarea
+          label="Reason for Cancellation"
+          placeholder="Enter reason..."
+          value={cancelReason}
+          onChange={(e) => setCancelReason(e.currentTarget.value)}
+          rows={3}
+          mb="sm"
+          required
+        />
+        <NumberInput
+          label="Cancellation Fee (₹)"
+          description="Leave at 0 to waive."
+          min={0}
+          value={cancelFee}
+          onChange={setCancelFee}
+          mb="md"
+        />
+        <Group justify="flex-end">
+          <Button variant="default" onClick={closeCancelStay}>Back</Button>
+          <Button
+            color="orange"
+            disabled={!cancelReason.trim()}
+            loading={cancelStayMutation.isPending}
+            onClick={() => cancelStayMutation.mutate({
+              logId: activeLog.id,
+              reason: cancelReason,
+              cancellation_fee: cancelFee,
+            })}
+          >
+            Confirm Cancellation
           </Button>
         </Group>
       </Modal>

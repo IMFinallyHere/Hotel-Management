@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Table, Button, Badge, Group, TextInput, Text, Stack, Skeleton } from '@mantine/core';
+import { Table, Button, Badge, Group, TextInput, Text, Stack, Skeleton, Tooltip } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
 import { pdf } from '@react-pdf/renderer';
 import { IconSearch, IconFileText } from '@tabler/icons-react';
@@ -51,11 +51,14 @@ export default function History() {
     const amenityTotal = (log.amenities || []).reduce((sum, a) =>
       sum + Number(a.price) * a.quantity * (a.charge_type === 'per_night' ? nights : 1), 0);
     const gstAmount = computeGst(log, nights, configMap['gst_percent']);
+    const overtimeFeeCharged = Number(log.overtime_fee_charged ?? 0);
+    const overtimeFeeDefault = Number(log.overtime_fee_default ?? 0);
+    const overtimeWaived = Math.max(0, overtimeFeeDefault - overtimeFeeCharged);
     const gstPct = Number(configMap['gst_percent'] ?? 0) / 100;
     const foodEff = (o) => Number(o.amount) + (o.food_gst_inclusive ? 0 : Math.round(Number(o.amount) * gstPct));
     const unpaidFood = (log.food_orders || []).filter(o => !o.is_paid).reduce((s, o) => s + foodEff(o), 0);
     const totalFood = (log.food_orders || []).reduce((s, o) => s + foodEff(o), 0);
-    const total = (log.is_nc ? 0 : (log.gst_inclusive ? (roomTotal + amenityTotal) : (roomTotal + amenityTotal + gstAmount))) + unpaidFood;
+    const total = (log.is_nc ? 0 : (log.gst_inclusive ? (roomTotal + amenityTotal) : (roomTotal + amenityTotal + gstAmount)) + overtimeFeeCharged) + unpaidFood;
     const guests = (log.customers || []).map(c => c.name).join(', ') || '—';
 
     const room = roomMap[log.room];
@@ -79,6 +82,22 @@ export default function History() {
         <Table.Td>{log.is_nc ? '—' : `₹${roomTotal}`}</Table.Td>
         <Table.Td>{gstAmount > 0 ? <Badge color="teal" variant="light">₹{gstAmount}</Badge> : '—'}</Table.Td>
         <Table.Td>{amenityTotal > 0 ? `₹${amenityTotal}` : '—'}</Table.Td>
+        <Table.Td>
+          {log.overtime_fee_charged !== null && log.overtime_fee_charged !== undefined ? (
+            <Stack gap={2}>
+              <Text size="xs">Charged: ₹{overtimeFeeCharged}</Text>
+              {overtimeWaived > 0 ? (
+                <Tooltip label={`Waived by ${log.checked_out_by_name ?? '—'}`} withArrow>
+                  <Text size="xs" c="orange" fw={600} style={{ cursor: 'default' }}>
+                    Waived: ₹{overtimeWaived}
+                  </Text>
+                </Tooltip>
+              ) : (
+                <Text size="xs" c="dimmed">Default: ₹{overtimeFeeDefault}</Text>
+              )}
+            </Stack>
+          ) : '—'}
+        </Table.Td>
         <Table.Td>{totalFood > 0 ? `₹${totalFood}` : '—'}</Table.Td>
         <Table.Td fw={600}>{log.is_nc ? <Badge color="grape" variant="light">₹0 (NC)</Badge> : `₹${total}`}</Table.Td>
         <Table.Td>
@@ -150,6 +169,7 @@ export default function History() {
               <Table.Th>Room Base</Table.Th>
               <Table.Th>GST</Table.Th>
               <Table.Th>Amenities</Table.Th>
+              <Table.Th>Overtime Fee</Table.Th>
               <Table.Th>Food</Table.Th>
               <Table.Th>Total</Table.Th>
               <Table.Th>Invoice</Table.Th>

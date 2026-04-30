@@ -20,6 +20,8 @@ export default function RoomDetailsTab({ room }) {
       beds: room.beds,
       price: room.price,
       is_ac: room.is_ac ?? false,
+      cancellation_fee: Number(room.cancellation_fee ?? 0),
+      overtime_fee: Number(room.overtime_fee ?? 0),
     },
     validate: {
       room_number: (v) => v ? null : 'Required',
@@ -71,6 +73,8 @@ export default function RoomDetailsTab({ room }) {
         />
         <NumberInput label="Beds" min={1} {...form.getInputProps('beds')} mb="sm" required />
         <NumberInput label="Default Price (₹)" min={0} {...form.getInputProps('price')} mb="sm" required />
+        <NumberInput label="Cancellation Fee (₹)" min={0} {...form.getInputProps('cancellation_fee')} mb="sm" />
+        <NumberInput label="Overtime Fee (₹)" min={0} {...form.getInputProps('overtime_fee')} mb="sm" />
         <Switch
           label="AC Room"
           checked={form.values.is_ac}
