@@ -17,11 +17,13 @@ from .views import (RoomTypeListCreate, RoomTypeDetail, RoomListCreate, RoomDeta
                     StayLogPaymentListCreate, StayLogPaymentDetail,
                     CashWithdrawalListCreate, CashWithdrawalDetail,
                     ExpenseListCreate, ExpenseDetail, ExpenseAttachmentCreate, ExpenseAttachmentDelete,
+                    StayNoteListCreate,
                     StayVehicleCreate, StayVehicleDelete,
                     FoodOrderListCreate, FoodOrderDetail, FoodOrderReceiptCreate, FoodOrderReceiptDelete,
-                    PLReportView, StaffSalesView, CashReconciliationView, ExpenseReportView,
+                    PLReportView, StaffSalesView, ExpenseReportView,
                     ExtendStay, GrantGrace, ShiftRoom, GSTReportView, StayLogHistory,
-                    ReservationReminderListCreate, ReservationReminderDetail)
+                    ReservationReminderListCreate, ReservationReminderDetail,
+                    SettlementView)
 from .auth_views import UserListCreate, UserDetail, GroupListCreate, GroupDetail, PermissionListView
 
 
@@ -77,6 +79,7 @@ urlpatterns = [
     path('expenses/<int:pk>/', ExpenseDetail.as_view(), name='expense-detail'),
     path('expenses/<int:pk>/attachments/', ExpenseAttachmentCreate.as_view(), name='expense-attachment-create'),
     path('expense-attachments/<int:pk>/', ExpenseAttachmentDelete.as_view(), name='expense-attachment-delete'),
+    path('stay-logs/<int:pk>/notes/', StayNoteListCreate.as_view(), name='stay-note-list-create'),
     path('stay-logs/<int:pk>/vehicles/', StayVehicleCreate.as_view(), name='stay-vehicle-create'),
     path('vehicles/<int:pk>/', StayVehicleDelete.as_view(), name='stay-vehicle-delete'),
     path('stay-logs/<int:pk>/food-orders/', FoodOrderListCreate.as_view(), name='food-order-list-create'),
@@ -98,10 +101,10 @@ urlpatterns = [
     path('reports/pipeline/', PipelineReportView.as_view(), name='report-pipeline'),
     path('finance/pl/', PLReportView.as_view(), name='finance-pl'),
     path('finance/staff-sales/', StaffSalesView.as_view(), name='finance-staff-sales'),
-    path('finance/cash-reconciliation/', CashReconciliationView.as_view(), name='finance-cash-reconciliation'),
     path('finance/expenses/', ExpenseReportView.as_view(), name='finance-expenses'),
     path('reminders/', ReservationReminderListCreate.as_view(), name='reminder-list-create'),
     path('reminder/<int:pk>/', ReservationReminderDetail.as_view(), name='reminder-detail'),
+    path('settlement/<str:date_str>/', SettlementView.as_view(), name='settlement'),
     path('user/permissions/', UserPermissionsView.as_view(), name='user-permissions'),
     path('users/', UserListCreate.as_view(), name='user-list-create'),
     path('users/<int:pk>/', UserDetail.as_view(), name='user-detail'),

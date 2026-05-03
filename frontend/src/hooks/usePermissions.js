@@ -15,10 +15,11 @@ const REPORT_KEYS = [
   'view_pipeline_report',
   'view_pl_report',
   'view_staff_sales_report',
-  'view_cash_reconciliation',
   'view_expense_report',
   'view_cancellation_report',
   'view_reservationreminder',
+  'view_daily_settlement',
+  'manage_daily_settlement',
 ];
 
 const ADMIN_KEYS = [

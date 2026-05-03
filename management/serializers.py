@@ -3,7 +3,7 @@ from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, RoomsPriceChart, Reservation, ReservationPayment, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, ExpenseAttachment, RoomStatusLog, PaymentMethod, StayVehicle, FoodOrder, FoodOrderReceipt, CancellationLog, CancellationRefund
+from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, RoomsPriceChart, Reservation, ReservationPayment, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, ExpenseAttachment, RoomStatusLog, PaymentMethod, StayVehicle, FoodOrder, FoodOrderReceipt, CancellationLog, CancellationRefund, StayNote
 
 
 class RoomTypeSerializer(serializers.ModelSerializer):
@@ -302,11 +302,30 @@ class StayLogAmenitySerializer(serializers.ModelSerializer):
     amenity_name = serializers.CharField(source='amenity.name', read_only=True)
     amenity_price = serializers.DecimalField(source='amenity.price', max_digits=7, decimal_places=0, read_only=True)
     charge_type = serializers.CharField(source='amenity.charge_type', read_only=True)
+    added_by_name = serializers.SerializerMethodField()
 
     class Meta:
         model = StayLogAmenity
-        fields = ['id', 'stay_log', 'amenity', 'quantity', 'amenity_name', 'amenity_price', 'charge_type']
+        fields = ['id', 'stay_log', 'amenity', 'quantity', 'amenity_name', 'amenity_price', 'charge_type', 'added_by_name', 'added_at']
         extra_kwargs = {'stay_log': {'read_only': True}}
+
+    def get_added_by_name(self, obj):
+        if not obj.added_by:
+            return None
+        return obj.added_by.get_full_name() or obj.added_by.username
+
+
+class StayNoteSerializer(serializers.ModelSerializer):
+    created_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = StayNote
+        fields = ['id', 'text', 'created_by_name', 'created_at']
+
+    def get_created_by_name(self, obj):
+        if not obj.created_by:
+            return None
+        return obj.created_by.get_full_name() or obj.created_by.username
 
 
 class StayVehicleSerializer(serializers.ModelSerializer):
@@ -343,11 +362,13 @@ class ActiveStayLogSerializer(StayLogSerializer):
     amenities = serializers.SerializerMethodField()
     payments = serializers.SerializerMethodField()
     nc_status = serializers.SerializerMethodField()
+    cancellation = serializers.SerializerMethodField()
     vehicles = StayVehicleSerializer(many=True, read_only=True)
     food_orders = FoodOrderSerializer(many=True, read_only=True)
+    notes = StayNoteSerializer(many=True, read_only=True)
 
     class Meta(StayLogSerializer.Meta):
-        fields = StayLogSerializer.Meta.fields + ['is_nc', 'customers', 'amenities', 'payments', 'nc_status', 'vehicles', 'food_orders']
+        fields = StayLogSerializer.Meta.fields + ['is_nc', 'customers', 'amenities', 'payments', 'nc_status', 'cancellation', 'vehicles', 'food_orders', 'notes']
 
     def get_customers(self, obj):
         return [
@@ -369,12 +390,14 @@ class ActiveStayLogSerializer(StayLogSerializer):
             {
                 'id': sa.id,
                 'amenity_id': sa.amenity_id,
-                'name': sa.amenity.name,
-                'price': sa.amenity.price,
+                'amenity_name': sa.amenity.name,
+                'amenity_price': sa.amenity.price,
                 'charge_type': sa.amenity.charge_type,
                 'quantity': sa.quantity,
+                'added_by_name': (sa.added_by.get_full_name() or sa.added_by.username) if sa.added_by else None,
+                'added_at': sa.added_at,
             }
-            for sa in obj.amenities.all()
+            for sa in obj.amenities.select_related('added_by').all()
         ]
 
     def get_payments(self, obj):
@@ -396,6 +419,17 @@ class ActiveStayLogSerializer(StayLogSerializer):
         if not latest:
             return None
         return {'id': latest.id, 'status': latest.status, 'reason': latest.reason}
+
+    def get_cancellation(self, obj):
+        c = obj.cancellations.first()
+        if not c:
+            return None
+        return {
+            'reason': c.reason,
+            'cancellation_fee': str(c.cancellation_fee),
+            'cancelled_by': c.cancelled_by.get_full_name() or c.cancelled_by.username if c.cancelled_by else None,
+            'cancelled_on': c.cancelled_on,
+        }
 
 
 class RoomNCRequestSerializer(serializers.ModelSerializer):
@@ -448,7 +482,7 @@ class CashWithdrawalSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = CashWithdrawal
-        fields = ['id', 'amount', 'reason', 'requested_by', 'requested_by_name', 'created_on', 'date']
+        fields = ['id', 'amount', 'reason', 'entry_type', 'requested_by', 'requested_by_name', 'created_on', 'date']
         read_only_fields = ['requested_by']
 
     def get_requested_by_name(self, obj):

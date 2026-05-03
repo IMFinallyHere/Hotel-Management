@@ -43,7 +43,7 @@ export default function RoomDashboard() {
   const [addOpened, { open: openAdd, close: closeAdd }] = useDisclosure(false);
 
   const addForm = useForm({
-    initialValues: { room_number: '', room_type: null, beds: 1, price: 0, is_ac: false },
+    initialValues: { room_number: '', room_type: null, beds: 1, price: 0, is_ac: false, overtime_fee: 0, cancellation_fee: 0 },
     validate: {
       room_number: (v) => v.trim() ? null : 'Required',
       room_type: (v) => v ? null : 'Required',
@@ -311,6 +311,8 @@ export default function RoomDashboard() {
           />
           <NumberInput label="Beds" min={1} {...addForm.getInputProps('beds')} mb="sm" required />
           <NumberInput label="Default Price (₹)" min={0} {...addForm.getInputProps('price')} mb="sm" required />
+          <NumberInput label="Overtime Fee (₹)" min={0} {...addForm.getInputProps('overtime_fee')} mb="sm" />
+          <NumberInput label="Cancellation Fee (₹)" min={0} {...addForm.getInputProps('cancellation_fee')} mb="sm" />
           <Switch
             label="AC Room"
             checked={addForm.values.is_ac}

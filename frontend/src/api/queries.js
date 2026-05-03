@@ -20,6 +20,7 @@ export const QUERY_KEYS = {
   groups: ['groups'],
   permissions: ['permissions'],
   reminders: ['reminders'],
+  settlement: (date) => ['settlement', date],
 };
 
 export const fetchRooms = () => api.get('/v1/rooms/').then(r => r.data);
@@ -57,7 +58,6 @@ export const REPORT_QUERY_KEYS = {
   pipelineReport: ['pipeline-report'],
   plReport: (params) => ['pl-report', params],
   staffSales: (params) => ['staff-sales', params],
-  cashReconciliation: (params) => ['cash-reconciliation', params],
   expenseReport: (params) => ['expense-report', params],
   cancellationReport: (params) => ['cancellation-report', params],
 };
@@ -91,12 +91,14 @@ export const fetchExpenses = (params) => api.get('/v1/expenses/', { params }).th
 export const fetchStayLogPayments = (logId) => api.get(`/v1/stay-logs/${logId}/payments/`).then(r => r.data);
 export const fetchPLReport = (params) => api.get('/v1/finance/pl/', { params }).then(r => r.data);
 export const fetchStaffSales = (params) => api.get('/v1/finance/staff-sales/', { params }).then(r => r.data);
-export const fetchCashReconciliation = (params) => api.get('/v1/finance/cash-reconciliation/', { params }).then(r => r.data);
 export const fetchExpenseReport = (params) => api.get('/v1/finance/expenses/', { params }).then(r => r.data);
 export const fetchStayHistory = (params) => api.get('/v1/stay-logs/history/', { params }).then(r => r.data);
 export const fetchGSTReport = (params) => api.get('/v1/reports/gst/', { params }).then(r => r.data);
 export const fetchCancellationReport = (params) => api.get('/v1/reports/cancellations/', { params }).then(r => r.data);
 export const fetchDueReminders = () => api.get('/v1/reminders/').then(r => r.data);
+
+export const addStayNote = (logId, text) =>
+  api.post(`/v1/stay-logs/${logId}/notes/`, { text }).then(r => r.data);
 
 export const addStayVehicle = (logId, vehicleNumber) =>
   api.post(`/v1/stay-logs/${logId}/vehicles/`, { vehicle_number: vehicleNumber }).then(r => r.data);
@@ -113,3 +115,6 @@ export const addFoodOrderReceipt = (orderId, files) => {
   return api.post(`/v1/food-orders/${orderId}/receipts/`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }).then(r => r.data);
 };
 export const deleteFoodOrderReceipt = (receiptId) => api.delete(`/v1/food-order-receipts/${receiptId}/`);
+
+export const fetchSettlement = (date) => api.get(`/v1/settlement/${date}/`).then(r => r.data);
+export const settleDay = (date, payload) => api.post(`/v1/settlement/${date}/settle/`, payload).then(r => r.data);

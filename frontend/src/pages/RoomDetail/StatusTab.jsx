@@ -17,6 +17,7 @@ import api from '../../api/client';
 import {
   QUERY_KEYS, QUERY_KEYS_OPS,
   fetchGroupCustomers, fetchConfigurations, fetchCountryCodes, fetchAmenities, fetchPriceChart, searchCustomers, fetchPaymentMethods,
+  addStayNote,
   addStayVehicle, deleteStayVehicle,
   addFoodOrder, updateFoodOrder, deleteFoodOrder, addFoodOrderReceipt, deleteFoodOrderReceipt,
 } from '../../api/queries';
@@ -88,6 +89,7 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
   const [childCount, setChildCount] = useState(0);
   const [vehicleInputs, setVehicleInputs] = useState([]);
   const [vehicleInputText, setVehicleInputText] = useState('');
+  const [noteText, setNoteText] = useState('');
   const ciDebounceTimers = useRef({});
 
   const { data: codes = [] } = useQuery({ queryKey: QUERY_KEYS.countryCodes, queryFn: fetchCountryCodes });
@@ -385,6 +387,16 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
   // Mark-paid inline state: orderId → paymentMethod select value
   const [markPaidMethod, setMarkPaidMethod] = useState({});
 
+  const addNoteMutation = useMutation({
+    mutationFn: ({ logId, text }) => addStayNote(logId, text),
+    onSuccess: () => {
+      qc.invalidateQueries(QUERY_KEYS.activeLogs);
+      setNoteText('');
+      notifySuccess('Note added.');
+    },
+    onError: (e) => notifyError(parseApiError(e, 'Failed to add note.')),
+  });
+
   const addVehicleMutation = useMutation({
     mutationFn: ({ logId, vehicleNumber }) => addStayVehicle(logId, vehicleNumber),
     onSuccess: () => {
@@ -459,7 +471,9 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
     const logAmenities = activeLog.amenities || [];
     const amenityCost = logAmenities.reduce((sum, a) =>
       sum + Number(a.price) * a.quantity * (a.charge_type === 'per_night' ? nights : 1), 0);
-    const overtimeFee = computeOvertimeFee(activeLog);
+    const overtimeFee = isLogOvertime(activeLog)
+      ? (Number(room.overtime_fee) > 0 ? Number(room.overtime_fee) : computeOvertimeFee(activeLog))
+      : 0;
     const gstAmount = computeGst(activeLog, nights, configMap['gst_percent']);
     const totalCost = activeLog.is_nc ? 0 : (activeLog.gst_inclusive ? (roomCost + amenityCost + overtimeFee) : (roomCost + amenityCost + overtimeFee + gstAmount));
     const foodOrders = activeLog.food_orders || [];
@@ -737,6 +751,46 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
             </Table>
           </div>
         )}
+
+        <div>
+          <Group justify="space-between" mb={4}>
+            <Text size="sm" fw={500}>Notes:</Text>
+          </Group>
+          {(activeLog.notes || []).length > 0 && (
+            <Stack gap={4} mb={6}>
+              {(activeLog.notes || []).map(n => (
+                <Group key={n.id} gap={6} align="flex-start" wrap="nowrap"
+                  style={{ background: 'var(--mantine-color-yellow-0)', border: '1px solid var(--mantine-color-yellow-3)', borderRadius: 6, padding: '4px 8px' }}>
+                  <Text size="xs" style={{ flex: 1, lineHeight: 1.4 }}>{n.text}</Text>
+                  <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap', lineHeight: 1.4 }}>
+                    {n.created_by_name} · {dayjs(n.created_at).format('DD MMM, hh:mm A')}
+                  </Text>
+                </Group>
+              ))}
+            </Stack>
+          )}
+          <Group align="flex-end" gap="xs">
+            <Textarea
+              placeholder="Add a note..."
+              value={noteText}
+              onChange={(e) => setNoteText(e.currentTarget.value)}
+              autosize
+              minRows={1}
+              maxRows={3}
+              style={{ flex: 1 }}
+              size="xs"
+            />
+            <Button
+              size="xs"
+              variant="light"
+              disabled={!noteText.trim()}
+              loading={addNoteMutation.isPending}
+              onClick={() => addNoteMutation.mutate({ logId: activeLog.id, text: noteText.trim() })}
+            >
+              Add
+            </Button>
+          </Group>
+        </div>
 
         <div>
           <Text size="sm" fw={500} mb="xs">Guests:</Text>

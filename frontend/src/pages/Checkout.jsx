@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Table, Button, Badge, Group, TextInput, Text, Modal, NumberInput, Select, Stack, ActionIcon, Loader, Textarea, Checkbox } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
-import { modals } from '@mantine/modals';
 import { IconSearch, IconPackage, IconTrash, IconCash, IconBan, IconFileText } from '@tabler/icons-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { pdf } from '@react-pdf/renderer';
@@ -10,7 +9,7 @@ import api from '../api/client';
 import { QUERY_KEYS, QUERY_KEYS_OPS, fetchActiveLogs, fetchRooms, fetchAmenities, fetchGroupCustomers, fetchConfigurations, fetchRoomTypes, fetchPaymentMethods } from '../api/queries';
 import { notifySuccess, notifyError } from '../api/notify';
 import { parseApiError } from '../api/errorUtils';
-import { parseConfigs, computeOvertimeFee, computeGst } from '../utils/configUtils';
+import { parseConfigs, isLogOvertime, computeOvertimeFee, computeGst } from '../utils/configUtils';
 import InvoiceDocument from '../components/InvoiceDocument';
 
 // ── Customer chips (badges that open detail modal) ──────────────────────────
@@ -98,11 +97,12 @@ export default function Checkout() {
   const [newPaymentAmount, setNewPaymentAmount] = useState(0);
   const [newPaymentNote, setNewPaymentNote] = useState('');
 
-  // Pay + Checkout modal (for enforced payment at checkout)
-  const [payCheckoutModal, { open: openPayCheckoutModal, close: closePayCheckoutModal }] = useDisclosure(false);
-  const [payCheckoutLog, setPayCheckoutLog] = useState(null);
-  const [payCheckoutAmount, setPayCheckoutAmount] = useState(0);
-  const [payCheckoutType, setPayCheckoutType] = useState(null);
+  // Unified checkout modal
+  const [checkoutModal, { open: openCheckoutModal, close: closeCheckoutModal }] = useDisclosure(false);
+  const [checkoutLog, setCheckoutLog] = useState(null);
+  const [coOvertimeFee, setCoOvertimeFee] = useState(0);
+  const [coPaymentType, setCoPaymentType] = useState(null);
+  const [coPaymentAmount, setCoPaymentAmount] = useState(0);
 
   // NC Request modal
   const [ncModal, { open: openNcModal, close: closeNcModal }] = useDisclosure(false);
@@ -131,29 +131,20 @@ export default function Checkout() {
     : logs;
 
   const checkoutMutation = useMutation({
-    mutationFn: (id) => api.post(`/v1/checkout/${id}/`),
+    mutationFn: async ({ logId, overtime_fee_charged, payment_method, amount }) => {
+      if (payment_method && amount > 0) {
+        await api.post(`/v1/stay-logs/${logId}/payments/`, { payment_method, amount, note: 'Collected at checkout' });
+      }
+      await api.post(`/v1/checkout/${logId}/`, { overtime_fee_charged });
+    },
     onSuccess: () => {
       qc.invalidateQueries(QUERY_KEYS.activeLogs);
       qc.invalidateQueries(QUERY_KEYS.rooms);
+      closeCheckoutModal();
+      setCheckoutLog(null);
       notifySuccess('Checkout successful.');
     },
     onError: (e) => notifyError(parseApiError(e, 'Checkout failed.')),
-  });
-
-  const payAndCheckoutMutation = useMutation({
-    mutationFn: async ({ logId, payment_method, amount }) => {
-      await api.post(`/v1/stay-logs/${logId}/payments/`, { payment_method, amount, note: 'Collected at checkout' });
-      await api.post(`/v1/checkout/${logId}/`);
-    },
-    onSuccess: () => {
-      qc.invalidateQueries(QUERY_KEYS.activeLogs);
-      qc.invalidateQueries(QUERY_KEYS.rooms);
-      closePayCheckoutModal();
-      setPayCheckoutLog(null);
-      setPayCheckoutType(null);
-      notifySuccess('Payment recorded and checkout successful.');
-    },
-    onError: (e) => notifyError(parseApiError(e, 'Pay & checkout failed.')),
   });
 
   const addAmenityMutation = useMutation({
@@ -234,34 +225,30 @@ export default function Checkout() {
     openShiftModal();
   };
 
-  const handleCheckout = (record) => {
+  const computeOutstanding = (record, overtimeFee) => {
     const nights = Math.max(1, dayjs().diff(dayjs(record.check_in), 'day'));
     const roomTotal = (Number(record.price) + record.extra_bed * Number(record.extra_per_bed_price)) * nights;
     const amenityTotal = (record.amenities || []).reduce((sum, a) =>
       sum + Number(a.price) * a.quantity * (a.charge_type === 'per_night' ? nights : 1), 0);
-    const overtimeFee = computeOvertimeFee(record);
     const gstAmount = computeGst(record, nights, configMap['gst_percent']);
     const billTotal = record.is_nc ? 0 : (record.gst_inclusive ? (roomTotal + amenityTotal + overtimeFee) : (roomTotal + amenityTotal + overtimeFee + gstAmount));
     const gstPct = Number(configMap['gst_percent'] ?? 0) / 100;
-    const foodEffective = (o) => Number(o.amount) + (o.food_gst_inclusive ? 0 : Math.round(Number(o.amount) * gstPct));
-    const unpaidFood = (record.food_orders || []).filter(o => !o.is_paid).reduce((s, o) => s + foodEffective(o), 0);
+    const unpaidFood = (record.food_orders || []).filter(o => !o.is_paid)
+      .reduce((s, o) => s + Number(o.amount) + (o.food_gst_inclusive ? 0 : Math.round(Number(o.amount) * gstPct)), 0);
     const totalPaid = (record.payments || []).reduce((s, p) => s + Number(p.amount), 0);
-    const outstanding = billTotal + unpaidFood - totalPaid;
+    return Math.max(0, billTotal + unpaidFood - totalPaid);
+  };
 
-    if (outstanding > 0) {
-      setPayCheckoutLog(record);
-      setPayCheckoutAmount(outstanding);
-      setPayCheckoutType(null);
-      openPayCheckoutModal();
-    } else {
-      modals.openConfirmModal({
-        title: 'Confirm checkout',
-        children: <Text size="sm">Check out room {roomMap[record.room]?.room_number ?? record.room}?</Text>,
-        labels: { confirm: 'Checkout', cancel: 'Cancel' },
-        confirmProps: { color: 'red' },
-        onConfirm: () => checkoutMutation.mutate(record.id),
-      });
-    }
+  const handleCheckout = (record) => {
+    const room = roomMap[record.room];
+    const initialFee = isLogOvertime(record)
+      ? (Number(room?.overtime_fee) > 0 ? Number(room.overtime_fee) : computeOvertimeFee(record))
+      : 0;
+    setCheckoutLog(record);
+    setCoOvertimeFee(initialFee);
+    setCoPaymentType(null);
+    setCoPaymentAmount(computeOutstanding(record, initialFee));
+    openCheckoutModal();
   };
 
   const openAmenities = (log) => {
@@ -682,46 +669,74 @@ export default function Checkout() {
         </Group>
       </Modal>
 
-      {/* Pay + Checkout Modal */}
+      {/* Unified Checkout Modal */}
       <Modal
-        opened={payCheckoutModal}
-        onClose={closePayCheckoutModal}
-        title={`Outstanding Balance — Room ${payCheckoutLog ? (roomMap[payCheckoutLog.room]?.room_number ?? payCheckoutLog.room) : ''}`}
+        opened={checkoutModal}
+        onClose={closeCheckoutModal}
+        title={`Checkout — Room ${checkoutLog ? (roomMap[checkoutLog.room]?.room_number ?? checkoutLog.room) : ''}`}
+        size="sm"
       >
-        <Text size="sm" c="dimmed" mb="md">
-          Full payment is required before checkout. Please collect the outstanding amount.
-        </Text>
-        <Text fw={600} size="lg" mb="md" c="red">
-          Outstanding: ₹{payCheckoutAmount}
-        </Text>
-        <Select
-          label="Payment Type"
-          placeholder="Select type"
-          data={paymentTypeOptions}
-          value={payCheckoutType}
-          onChange={setPayCheckoutType}
-          mb="sm"
-        />
-        <NumberInput
-          label="Amount (₹)"
-          value={payCheckoutAmount}
-          onChange={setPayCheckoutAmount}
-          min={1}
-          mb="md"
-        />
+        {(checkoutLog?.notes || []).length > 0 && (
+          <div style={{ marginBottom: 'var(--mantine-spacing-md)' }}>
+            <Text size="xs" fw={600} c="dimmed" mb={4}>STAY NOTES</Text>
+            {checkoutLog.notes.map(n => (
+              <Group key={n.id} gap={6} align="flex-start" wrap="nowrap" mb={4}
+                style={{ background: 'var(--mantine-color-yellow-0)', border: '1px solid var(--mantine-color-yellow-3)', borderRadius: 6, padding: '4px 8px' }}>
+                <Text size="xs" style={{ flex: 1 }}>{n.text}</Text>
+                <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap' }}>{n.created_by_name}</Text>
+              </Group>
+            ))}
+          </div>
+        )}
+        {checkoutLog && isLogOvertime(checkoutLog) && (
+          <NumberInput
+            label="Overtime Fee (₹)"
+            description="Set to 0 to waive."
+            min={0}
+            value={coOvertimeFee}
+            onChange={(val) => {
+              setCoOvertimeFee(val);
+              setCoPaymentAmount(computeOutstanding(checkoutLog, val ?? 0));
+            }}
+            mb="md"
+          />
+        )}
+        {coPaymentAmount > 0 ? (
+          <>
+            <Text size="sm" c="red" fw={600} mb="sm">Outstanding: ₹{checkoutLog ? computeOutstanding(checkoutLog, coOvertimeFee) : 0}</Text>
+            <Select
+              label="Payment Method"
+              placeholder="Select method"
+              data={paymentTypeOptions}
+              value={coPaymentType}
+              onChange={setCoPaymentType}
+              mb="sm"
+            />
+            <NumberInput
+              label="Amount (₹)"
+              value={coPaymentAmount}
+              onChange={setCoPaymentAmount}
+              min={1}
+              mb="md"
+            />
+          </>
+        ) : (
+          <Text size="sm" c="dimmed" mb="md">No outstanding balance.</Text>
+        )}
         <Group justify="flex-end">
-          <Button variant="default" onClick={closePayCheckoutModal}>Cancel</Button>
+          <Button variant="default" onClick={closeCheckoutModal}>Cancel</Button>
           <Button
-            color="teal"
-            disabled={!payCheckoutType || !payCheckoutAmount}
-            loading={payAndCheckoutMutation.isPending}
-            onClick={() => payAndCheckoutMutation.mutate({
-              logId: payCheckoutLog.id,
-              payment_method: Number(payCheckoutType),
-              amount: payCheckoutAmount,
+            color="red"
+            disabled={coPaymentAmount > 0 && (!coPaymentType || !coPaymentAmount)}
+            loading={checkoutMutation.isPending}
+            onClick={() => checkoutMutation.mutate({
+              logId: checkoutLog.id,
+              overtime_fee_charged: coOvertimeFee,
+              payment_method: coPaymentType ? Number(coPaymentType) : null,
+              amount: coPaymentAmount,
             })}
           >
-            Pay & Checkout
+            Confirm Checkout
           </Button>
         </Group>
       </Modal>

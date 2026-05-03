@@ -176,6 +176,8 @@ class StayLogAmenity(models.Model):
     stay_log = models.ForeignKey(RoomStayLogs, models.CASCADE, 'amenities')
     amenity = models.ForeignKey(Amenity, models.PROTECT, 'usage')
     quantity = models.PositiveSmallIntegerField(default=1)
+    added_by = models.ForeignKey(User, models.SET_NULL, null=True, blank=True, related_name='added_amenities')
+    added_at = models.DateTimeField(auto_now_add=True, null=True)
 
 
 class ReportPermissions(models.Model):
@@ -199,6 +201,8 @@ class ReportPermissions(models.Model):
             ('view_cash_reconciliation', 'Can view cash reconciliation'),
             ('view_expense_report', 'Can view expense report'),
             ('view_cancellation_report', 'Can view cancellation report'),
+            ('view_daily_settlement', 'Can view daily settlement'),
+            ('manage_daily_settlement', 'Can settle/manage daily settlement'),
         ]
 
 
@@ -223,8 +227,10 @@ class Payment(models.Model):
 
 
 class CashWithdrawal(models.Model):
+    ENTRY_TYPES = [('debit', 'Debit (Withdrawal)'), ('credit', 'Credit (Deposit)')]
     amount = models.DecimalField(max_digits=10, decimal_places=0)
     reason = models.TextField()
+    entry_type = models.CharField(max_length=6, choices=ENTRY_TYPES, default='debit')
     requested_by = models.ForeignKey(User, models.SET_NULL, null=True, related_name='cash_withdrawals')
     created_on = models.DateTimeField(auto_now_add=True)
     date = models.DateField(default=timezone.localdate)
@@ -243,6 +249,16 @@ class ExpenseAttachment(models.Model):
     expense = models.ForeignKey(Expense, models.CASCADE, related_name='attachments')
     file = models.FileField(upload_to='expense_attachments/')
     uploaded_on = models.DateTimeField(auto_now_add=True)
+
+
+class StayNote(models.Model):
+    stay_log = models.ForeignKey(RoomStayLogs, models.CASCADE, related_name='notes')
+    text = models.TextField()
+    created_by = models.ForeignKey(User, models.SET_NULL, null=True, related_name='stay_notes')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
 
 
 class StayVehicle(models.Model):
@@ -290,3 +306,63 @@ class CancellationRefund(models.Model):
     processed_by = models.ForeignKey(User, models.SET_NULL, null=True, related_name='cancellation_refunds_processed')
     note = models.CharField(max_length=200, blank=True)
     created_on = models.DateTimeField(auto_now_add=True)
+
+
+class MoneyEvent(models.Model):
+    EVENT_TYPES = [
+        ('payment_received',    'Payment Received'),
+        ('food_payment',        'Food Payment'),
+        ('reservation_advance', 'Reservation Advance'),
+        ('advance_applied',     'Advance Applied at Check-in'),
+        ('expense_paid',        'Expense Paid'),
+        ('cash_withdrawal',     'Cash Withdrawal'),
+        ('cash_deposit',        'Cash Deposit'),
+        ('refund_paid',         'Refund Paid'),
+        ('cancellation_fee',    'Cancellation Fee Kept'),
+    ]
+    event_type     = models.CharField(max_length=30, choices=EVENT_TYPES)
+    amount         = models.DecimalField(max_digits=10, decimal_places=0)
+    payment_method = models.ForeignKey(PaymentMethod, models.SET_NULL, null=True, blank=True, related_name='money_events')
+    date           = models.DateField(default=timezone.localdate)
+    created_on     = models.DateTimeField(auto_now_add=True)
+    recorded_by    = models.ForeignKey(User, models.SET_NULL, null=True, blank=True, related_name='money_events_recorded')
+    stay_log       = models.ForeignKey(RoomStayLogs, models.SET_NULL, null=True, blank=True, related_name='money_events')
+    reservation    = models.ForeignKey(Reservation, models.SET_NULL, null=True, blank=True, related_name='money_events')
+    cancellation   = models.ForeignKey(CancellationLog, models.SET_NULL, null=True, blank=True, related_name='money_events')
+    food_order     = models.ForeignKey(FoodOrder, models.SET_NULL, null=True, blank=True, related_name='money_events')
+    note           = models.CharField(max_length=200, blank=True)
+
+
+class DailySettlement(models.Model):
+    STATUS_CHOICES = [('pending', 'Pending'), ('settled', 'Settled')]
+    date   = models.DateField(unique=True)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
+
+    # Snapshot values — zero until owner settles
+    snap_room_payments            = models.DecimalField(max_digits=12, decimal_places=0, default=0)
+    snap_food_payments            = models.DecimalField(max_digits=12, decimal_places=0, default=0)
+    snap_reservation_advances     = models.DecimalField(max_digits=12, decimal_places=0, default=0)
+    snap_direct_cancellation_fees = models.DecimalField(max_digits=12, decimal_places=0, default=0)
+    snap_cash_deposits            = models.DecimalField(max_digits=12, decimal_places=0, default=0)
+    snap_total_inflow             = models.DecimalField(max_digits=12, decimal_places=0, default=0)
+    snap_expenses                 = models.DecimalField(max_digits=12, decimal_places=0, default=0)
+    snap_withdrawals              = models.DecimalField(max_digits=12, decimal_places=0, default=0)
+    snap_refunds                  = models.DecimalField(max_digits=12, decimal_places=0, default=0)
+    snap_total_outflow            = models.DecimalField(max_digits=12, decimal_places=0, default=0)
+    snap_net                      = models.DecimalField(max_digits=12, decimal_places=0, default=0)
+
+    settled_by = models.ForeignKey(User, models.SET_NULL, null=True, blank=True, related_name='settlements_made')
+    settled_at = models.DateTimeField(null=True, blank=True)
+    notes      = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class SettlementMethodBreakdown(models.Model):
+    settlement      = models.ForeignKey(DailySettlement, models.CASCADE, related_name='method_breakdowns')
+    payment_method  = models.ForeignKey(PaymentMethod, models.PROTECT, related_name='settlement_breakdowns')
+    system_inflow   = models.DecimalField(max_digits=12, decimal_places=0, default=0)
+    system_outflow  = models.DecimalField(max_digits=12, decimal_places=0, default=0)
+    actual_received = models.DecimalField(max_digits=12, decimal_places=0, null=True, blank=True)
+
+    class Meta:
+        unique_together = [('settlement', 'payment_method')]

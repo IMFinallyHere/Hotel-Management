@@ -1,11 +1,10 @@
 import { useState } from 'react';
 import {
   Tabs, Button, Badge, Group, Text, Loader, Center,
-  NumberInput, Select, Modal, Divider, Textarea, Checkbox, Alert,
+  NumberInput, Select, Modal, Textarea, Checkbox, Alert,
 } from '@mantine/core';
 import { IconArrowLeft, IconLogout, IconAlertTriangle } from '@tabler/icons-react';
 import { useDisclosure } from '@mantine/hooks';
-import { modals } from '@mantine/modals';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
@@ -41,15 +40,10 @@ export default function RoomDetail() {
   const { data: allRooms = [] } = useQuery({ queryKey: QUERY_KEYS.rooms, queryFn: fetchRooms });
   const { data: paymentMethods = [] } = useQuery({ queryKey: QUERY_KEYS.paymentMethods, queryFn: () => fetchPaymentMethods() });
 
-  const checkoutMutation = useMutation({
-    mutationFn: ({ logId, overtime_fee_charged }) => api.post(`/v1/checkout/${logId}/`, { overtime_fee_charged }),
-    onSuccess: () => {
-      qc.invalidateQueries(QUERY_KEYS.activeLogs);
-      qc.invalidateQueries(QUERY_KEYS.rooms);
-      notifySuccess('Checkout successful.');
-    },
-    onError: (e) => notifyError(parseApiError(e, 'Checkout failed.')),
-  });
+  const [checkoutOpened, { open: openCheckoutModal, close: closeCheckoutModal }] = useDisclosure(false);
+  const [coOvertimeFee, setCoOvertimeFee] = useState(0);
+  const [coPaymentType, setCoPaymentType] = useState(null);
+  const [coPaymentAmount, setCoPaymentAmount] = useState(0);
 
   const [shiftOpened, { open: openShift, close: closeShift }] = useDisclosure(false);
   const [shiftRoomId, setShiftRoomId] = useState(null);
@@ -59,18 +53,14 @@ export default function RoomDetail() {
   const [shiftExtraBed, setShiftExtraBed] = useState(0);
   const [shiftExtraBedPrice, setShiftExtraBedPrice] = useState(0);
 
-  const [payCheckoutOpened, { open: openPayCheckout, close: closePayCheckout }] = useDisclosure(false);
-  const [payCheckoutAmount, setPayCheckoutAmount] = useState(0);
-  const [payCheckoutType, setPayCheckoutType] = useState(null);
 
   const [cancelStayOpened, { open: openCancelStay, close: closeCancelStay }] = useDisclosure(false);
   const [cancelReason, setCancelReason] = useState('');
   const [cancelFee, setCancelFee] = useState(0);
+  const [cancelFeePaymentMethod, setCancelFeePaymentMethod] = useState(null);
   const [cancelRefundPaymentMethod, setCancelRefundPaymentMethod] = useState(null);
   const [cancelRefundNote, setCancelRefundNote] = useState('');
 
-  const [overtimeFeeOpened, { open: openOvertimeFee, close: closeOvertimeFee }] = useDisclosure(false);
-  const [overtimeFeeCharged, setOvertimeFeeCharged] = useState(0);
 
   const shiftMutation = useMutation({
     mutationFn: ({ logId, new_room, reason, price, apply_extra_beds, extra_bed, extra_per_bed_price }) =>
@@ -87,25 +77,28 @@ export default function RoomDetail() {
     onError: (e) => notifyError(parseApiError(e, 'Failed to shift room.')),
   });
 
-  const payAndCheckoutMutation = useMutation({
-    mutationFn: async ({ logId, payment_method, amount, overtime_fee_charged }) => {
-      await api.post(`/v1/stay-logs/${logId}/payments/`, { payment_method, amount, note: 'Collected at checkout' });
+  const checkoutMutation = useMutation({
+    mutationFn: async ({ logId, overtime_fee_charged, payment_method, amount }) => {
+      if (payment_method && amount > 0) {
+        await api.post(`/v1/stay-logs/${logId}/payments/`, { payment_method, amount, note: 'Collected at checkout' });
+      }
       await api.post(`/v1/checkout/${logId}/`, { overtime_fee_charged });
     },
     onSuccess: () => {
       qc.invalidateQueries(QUERY_KEYS.activeLogs);
       qc.invalidateQueries(QUERY_KEYS.rooms);
-      closePayCheckout();
-      notifySuccess('Payment recorded and checkout successful.');
+      closeCheckoutModal();
+      notifySuccess('Checkout successful.');
     },
-    onError: (e) => notifyError(parseApiError(e, 'Pay & checkout failed.')),
+    onError: (e) => notifyError(parseApiError(e, 'Checkout failed.')),
   });
 
   const cancelStayMutation = useMutation({
-    mutationFn: ({ logId, reason, cancellation_fee, refund_amount, refund_payment_method, refund_note }) =>
+    mutationFn: ({ logId, reason, cancellation_fee, cancellation_fee_payment_method, refund_amount, refund_payment_method, refund_note }) =>
       api.post(`/v1/stay-logs/${logId}/cancel/`, {
         reason,
         cancellation_fee,
+        cancellation_fee_payment_method,
         refund_amount,
         refund_payment_method,
         refund_note,
@@ -115,6 +108,7 @@ export default function RoomDetail() {
       qc.invalidateQueries(QUERY_KEYS.rooms);
       closeCancelStay();
       setCancelReason('');
+      setCancelFeePaymentMethod(null);
       setCancelRefundPaymentMethod(null);
       setCancelRefundNote('');
       notifySuccess('Stay cancelled. Room moved to cleaning.');
@@ -156,7 +150,8 @@ export default function RoomDetail() {
   else if (room.status === 'out_of_order') { statusColor = 'dark'; statusLabel = 'Out of Order'; }
   else if (nextReservation) { statusColor = 'orange'; statusLabel = 'Reserved'; }
 
-  const proceedCheckout = (overtimeFee) => {
+  const computeCheckoutOutstanding = (overtimeFee) => {
+    if (!activeLog) return 0;
     const nights = Math.max(1, dayjs().diff(dayjs(activeLog.check_in), 'day'));
     const roomTotal = (Number(activeLog.price) + activeLog.extra_bed * Number(activeLog.extra_per_bed_price)) * nights;
     const amenityTotal = (activeLog.amenities || []).reduce((sum, a) =>
@@ -164,33 +159,20 @@ export default function RoomDetail() {
     const gstAmount = computeGst(activeLog, nights, configMap['gst_percent']);
     const billTotal = activeLog.is_nc ? 0 : (activeLog.gst_inclusive ? (roomTotal + amenityTotal + overtimeFee) : (roomTotal + amenityTotal + overtimeFee + gstAmount));
     const gstPct = Number(configMap['gst_percent'] ?? 0) / 100;
-    const foodEffective = (o) => Number(o.amount) + (o.food_gst_inclusive ? 0 : Math.round(Number(o.amount) * gstPct));
-    const unpaidFood = (activeLog.food_orders || []).filter(o => !o.is_paid).reduce((s, o) => s + foodEffective(o), 0);
+    const unpaidFood = (activeLog.food_orders || []).filter(o => !o.is_paid)
+      .reduce((s, o) => s + Number(o.amount) + (o.food_gst_inclusive ? 0 : Math.round(Number(o.amount) * gstPct)), 0);
     const totalPaid = (activeLog.payments || []).reduce((s, p) => s + Number(p.amount), 0);
-    const outstandingAmt = billTotal + unpaidFood - totalPaid;
-
-    if (outstandingAmt > 0) {
-      setPayCheckoutAmount(outstandingAmt);
-      setPayCheckoutType(null);
-      openPayCheckout();
-    } else {
-      modals.openConfirmModal({
-        title: 'Confirm checkout',
-        children: <Text size="sm">Check out this room?</Text>,
-        labels: { confirm: 'Checkout', cancel: 'Cancel' },
-        confirmProps: { color: 'red' },
-        onConfirm: () => checkoutMutation.mutate({ logId: activeLog.id, overtime_fee_charged: overtimeFee }),
-      });
-    }
+    return Math.max(0, billTotal + unpaidFood - totalPaid);
   };
 
   const handleCheckout = () => {
-    if (isLogOvertime(activeLog) && Number(room.overtime_fee) > 0) {
-      setOvertimeFeeCharged(Number(room.overtime_fee));
-      openOvertimeFee();
-    } else {
-      proceedCheckout(0);
-    }
+    const initialFee = isLogOvertime(activeLog)
+      ? (Number(room.overtime_fee) > 0 ? Number(room.overtime_fee) : computeOvertimeFee(activeLog))
+      : 0;
+    setCoOvertimeFee(initialFee);
+    setCoPaymentType(null);
+    setCoPaymentAmount(computeCheckoutOutstanding(initialFee));
+    openCheckoutModal();
   };
 
   const occupiedIds = new Set(activeLogs.map(l => l.room));
@@ -329,70 +311,69 @@ export default function RoomDetail() {
         </Group>
       </Modal>
 
-      {/* Pay + Checkout Modal */}
-      <Modal opened={payCheckoutOpened} onClose={closePayCheckout} title="Outstanding Balance">
-        <Text size="sm" c="dimmed" mb="md">
-          Full payment is required before checkout. Please collect the outstanding amount.
-        </Text>
-        <Text fw={600} size="lg" mb="md" c="red">
-          Outstanding: ₹{payCheckoutAmount}
-        </Text>
-        <Select
-          label="Payment Type"
-          placeholder="Select type"
-          data={paymentTypeOptions}
-          value={payCheckoutType}
-          onChange={setPayCheckoutType}
-          mb="sm"
-        />
-        <NumberInput
-          label="Amount (₹)"
-          value={payCheckoutAmount}
-          onChange={setPayCheckoutAmount}
-          min={1}
-          mb="md"
-        />
+      {/* Unified Checkout Modal */}
+      <Modal opened={checkoutOpened} onClose={closeCheckoutModal} title={`Checkout — Room ${room.room_number}`} size="sm">
+        {activeLog && (activeLog.notes || []).length > 0 && (
+          <div style={{ marginBottom: 'var(--mantine-spacing-md)' }}>
+            <Text size="xs" fw={600} c="dimmed" mb={4}>STAY NOTES</Text>
+            {activeLog.notes.map(n => (
+              <Group key={n.id} gap={6} align="flex-start" wrap="nowrap" mb={4}
+                style={{ background: 'var(--mantine-color-yellow-0)', border: '1px solid var(--mantine-color-yellow-3)', borderRadius: 6, padding: '4px 8px' }}>
+                <Text size="xs" style={{ flex: 1 }}>{n.text}</Text>
+                <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap' }}>{n.created_by_name}</Text>
+              </Group>
+            ))}
+          </div>
+        )}
+        {activeLog && isLogOvertime(activeLog) && (
+          <NumberInput
+            label="Overtime Fee (₹)"
+            description="Set to 0 to waive."
+            min={0}
+            value={coOvertimeFee}
+            onChange={(val) => {
+              setCoOvertimeFee(val);
+              setCoPaymentAmount(computeCheckoutOutstanding(val ?? 0));
+            }}
+            mb="md"
+          />
+        )}
+        {coPaymentAmount > 0 ? (
+          <>
+            <Text size="sm" c="red" fw={600} mb="sm">Outstanding: ₹{computeCheckoutOutstanding(coOvertimeFee)}</Text>
+            <Select
+              label="Payment Method"
+              placeholder="Select method"
+              data={paymentTypeOptions}
+              value={coPaymentType}
+              onChange={setCoPaymentType}
+              mb="sm"
+            />
+            <NumberInput
+              label="Amount (₹)"
+              value={coPaymentAmount}
+              onChange={setCoPaymentAmount}
+              min={1}
+              mb="md"
+            />
+          </>
+        ) : (
+          <Text size="sm" c="dimmed" mb="md">No outstanding balance.</Text>
+        )}
         <Group justify="flex-end">
-          <Button variant="default" onClick={closePayCheckout}>Cancel</Button>
-          <Button
-            color="teal"
-            disabled={!payCheckoutType || !payCheckoutAmount}
-            loading={payAndCheckoutMutation.isPending}
-            onClick={() => payAndCheckoutMutation.mutate({
-              logId: activeLog.id,
-              payment_method: Number(payCheckoutType),
-              amount: payCheckoutAmount,
-              overtime_fee_charged: overtimeFeeCharged,
-            })}
-          >
-            Pay & Checkout
-          </Button>
-        </Group>
-      </Modal>
-
-      {/* Overtime Fee Confirmation Modal */}
-      <Modal opened={overtimeFeeOpened} onClose={closeOvertimeFee} title="Overtime Fee">
-        <Alert icon={<IconAlertTriangle size={16} />} color="yellow" mb="md">
-          This room is overtime. Confirm the overtime fee to charge before proceeding.
-        </Alert>
-        <NumberInput
-          label="Overtime Fee (₹)"
-          description="Set to 0 to waive the fee."
-          min={0}
-          value={overtimeFeeCharged}
-          onChange={setOvertimeFeeCharged}
-          mb="md"
-        />
-        <Group justify="flex-end">
-          <Button variant="default" onClick={closeOvertimeFee}>Cancel</Button>
+          <Button variant="default" onClick={closeCheckoutModal}>Cancel</Button>
           <Button
             color="red"
-            onClick={() => {
-              closeOvertimeFee();
-              proceedCheckout(overtimeFeeCharged);
-            }}
+            disabled={coPaymentAmount > 0 && (!coPaymentType || !coPaymentAmount)}
+            loading={checkoutMutation.isPending}
+            onClick={() => checkoutMutation.mutate({
+              logId: activeLog.id,
+              overtime_fee_charged: coOvertimeFee,
+              payment_method: coPaymentType ? Number(coPaymentType) : null,
+              amount: coPaymentAmount,
+            })}
           >
-            Proceed to Checkout
+            Confirm Checkout
           </Button>
         </Group>
       </Modal>
@@ -413,12 +394,24 @@ export default function RoomDetail() {
         />
         <NumberInput
           label="Cancellation Fee (₹)"
-          description="Amount retained from collected payments."
+          description={activeLogPaidTotal === 0 ? "Guest pays this directly — no advance to deduct from." : "Amount retained from collected payments."}
           min={0}
           value={cancelFee}
           onChange={setCancelFee}
           mb="sm"
         />
+        {cancelFee > 0 && activeLogPaidTotal === 0 && (
+          <Select
+            label="Fee Payment Method"
+            description="How the guest is paying the cancellation fee."
+            placeholder="Select method"
+            data={paymentTypeOptions}
+            value={cancelFeePaymentMethod}
+            onChange={setCancelFeePaymentMethod}
+            mb="sm"
+            required
+          />
+        )}
         <NumberInput
           label="Refund Amount (₹)"
           description={`Payments collected: ₹${activeLogPaidTotal.toLocaleString()} · Cancellation fee retained: ₹${Number(cancelFee || 0).toLocaleString()}`}
@@ -455,12 +448,17 @@ export default function RoomDetail() {
           <Button variant="default" onClick={closeCancelStay}>Back</Button>
           <Button
             color="orange"
-            disabled={!cancelReason.trim() || (Number(cancelRefundAmount) > 0 && !cancelRefundPaymentMethod)}
+            disabled={
+              !cancelReason.trim() ||
+              (Number(cancelRefundAmount) > 0 && !cancelRefundPaymentMethod) ||
+              (Number(cancelFee) > 0 && activeLogPaidTotal === 0 && !cancelFeePaymentMethod)
+            }
             loading={cancelStayMutation.isPending}
             onClick={() => cancelStayMutation.mutate({
               logId: activeLog.id,
               reason: cancelReason,
               cancellation_fee: cancelFee,
+              cancellation_fee_payment_method: cancelFeePaymentMethod ? Number(cancelFeePaymentMethod) : null,
               refund_amount: cancelRefundAmount,
               refund_payment_method: cancelRefundPaymentMethod ? Number(cancelRefundPaymentMethod) : null,
               refund_note: cancelRefundNote,
@@ -476,17 +474,19 @@ export default function RoomDetail() {
           <Tabs.Tab value="status">Status / Actions</Tabs.Tab>
           <Tabs.Tab value="reservations">Reservations</Tabs.Tab>
           <Tabs.Tab value="details">Room Details</Tabs.Tab>
+          <Tabs.Tab value="logs">Logs</Tabs.Tab>
         </Tabs.List>
         <Tabs.Panel value="status" pt="xs" keepMounted>
           <StatusTab room={room} activeLogs={activeLogs} isReservedToday={isReservedToday} />
-          <Divider my="lg" label="Status Change Log" labelPosition="left" />
-          <RoomStatusLogSection roomId={room.id} />
         </Tabs.Panel>
         <Tabs.Panel value="reservations" pt="xs">
           <ReservationsTab room={room} reservations={reservations} isOccupied={!!activeLog} configMap={configMap} />
         </Tabs.Panel>
         <Tabs.Panel value="details" pt="xs">
           <RoomDetailsTab room={room} />
+        </Tabs.Panel>
+        <Tabs.Panel value="logs" pt="xs">
+          <RoomStatusLogSection roomId={room.id} />
         </Tabs.Panel>
       </Tabs>
     </div>

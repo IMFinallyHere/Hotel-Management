@@ -10,8 +10,10 @@ from django.db.models import ProtectedError
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, Group, CustomerGroup, RoomsPriceChart, Reservation, ReservationPayment, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, ExpenseAttachment, RoomStatusLog, PaymentMethod, StayVehicle, FoodOrder, FoodOrderReceipt, CancellationLog, CancellationRefund
-from .serializers import RoomSerializer, RoomTypeSerializer, CountryCodeSerializer, CustomerSerializer, ConfigurationSerializer, CheckinSerializer, GroupCustomerSerializer, RoomsPriceChartSerializer, StayLogSerializer, StayLogUpdateSerializer, ReservationSerializer, ReservationReminderSerializer, AmenitySerializer, StayLogAmenitySerializer, ActiveStayLogSerializer, RoomNCRequestSerializer, PaymentSerializer, CashWithdrawalSerializer, ExpenseSerializer, ExpenseAttachmentSerializer, ExtendStaySerializer, GraceSerializer, ShiftRoomSerializer, RoomStatusLogSerializer, PaymentMethodSerializer, StayVehicleSerializer, FoodOrderSerializer, FoodOrderReceiptSerializer, CancellationLogSerializer
+from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, Group, CustomerGroup, RoomsPriceChart, Reservation, ReservationPayment, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, ExpenseAttachment, RoomStatusLog, PaymentMethod, StayVehicle, FoodOrder, FoodOrderReceipt, CancellationLog, CancellationRefund, MoneyEvent, DailySettlement, SettlementMethodBreakdown, StayNote
+from .serializers import RoomSerializer, RoomTypeSerializer, CountryCodeSerializer, CustomerSerializer, ConfigurationSerializer, CheckinSerializer, GroupCustomerSerializer, RoomsPriceChartSerializer, StayLogSerializer, StayLogUpdateSerializer, ReservationSerializer, ReservationReminderSerializer, AmenitySerializer, StayLogAmenitySerializer, ActiveStayLogSerializer, RoomNCRequestSerializer, PaymentSerializer, CashWithdrawalSerializer, ExpenseSerializer, ExpenseAttachmentSerializer, ExtendStaySerializer, GraceSerializer, ShiftRoomSerializer, RoomStatusLogSerializer, PaymentMethodSerializer, StayVehicleSerializer, FoodOrderSerializer, FoodOrderReceiptSerializer, CancellationLogSerializer, StayNoteSerializer
+from .ledger import record_money_event, assert_date_not_settled
+from .settlement import compute_settlement_snapshot, serialize_event
 from .permissions import report_permission, HasModelPermission
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.permissions import DjangoModelPermissions
@@ -40,13 +42,21 @@ def _create_cancellation_refund(cancellation, request, available_amount):
     if not payment_method_id:
         raise ValueError('Refund payment method is required when refund amount is greater than 0.')
     payment_method = get_object_or_404(PaymentMethod, pk=payment_method_id)
-    return CancellationRefund.objects.create(
+    refund = CancellationRefund.objects.create(
         cancellation=cancellation,
         amount=refund_amount,
         payment_method=payment_method,
         processed_by=request.user,
         note=request.data.get('refund_note', '').strip(),
     )
+    record_money_event(
+        'refund_paid', refund_amount,
+        payment_method=payment_method,
+        recorded_by=request.user,
+        cancellation=cancellation,
+        note=request.data.get('refund_note', '').strip(),
+    )
+    return refund
 
 
 def _reservation_group_advance_summary(group_id):
@@ -352,6 +362,14 @@ class ReservationListCreate(generics.ListCreateAPIView):
                     processed_by=self.request.user,
                     note='Reservation advance',
                 )
+                pm = PaymentMethod.objects.filter(pk=payment_method_id).first()
+                record_money_event(
+                    'reservation_advance', advance_amount,
+                    payment_method=pm,
+                    recorded_by=self.request.user,
+                    reservation=reservation,
+                    note='Reservation advance',
+                )
 
     def get_queryset(self):
         qs = Reservation.objects.select_related('room', 'group').prefetch_related('group__customers__customer')
@@ -402,9 +420,10 @@ class CancelCheckin(APIView):
         cancellation_fee = _parse_money(request.data.get('cancellation_fee'), default_fee)
         total_received = sum(p.amount for p in log.payments.all())
         refund_amount = _parse_money(request.data.get('refund_amount'))
+        fee_paid_directly = bool(request.data.get('cancellation_fee_payment_method'))
         if refund_amount > total_received:
             return Response({'error': f'Refund cannot exceed received amount of ₹{total_received}.'}, status=400)
-        if cancellation_fee + refund_amount > total_received:
+        if not fee_paid_directly and cancellation_fee + refund_amount > total_received:
             return Response({'error': f'Cancellation fee and refund cannot exceed received amount of ₹{total_received}.'}, status=400)
         if refund_amount > 0 and not request.data.get('refund_payment_method'):
             return Response({'error': 'Refund payment method is required when refund amount is greater than 0.'}, status=400)
@@ -434,6 +453,16 @@ class CancelCheckin(APIView):
                     cancellation_fee=cancellation_fee,
                     cancelled_by=request.user,
                 )
+                if cancellation_fee > 0:
+                    fee_pm_id = request.data.get('cancellation_fee_payment_method')
+                    fee_pm    = PaymentMethod.objects.filter(pk=fee_pm_id).first() if fee_pm_id else None
+                    record_money_event(
+                        'cancellation_fee', cancellation_fee,
+                        payment_method=fee_pm,
+                        recorded_by=request.user,
+                        stay_log=log,
+                        cancellation=cancellation,
+                    )
                 _create_cancellation_refund(cancellation, request, total_received)
         except ValueError as exc:
             return Response({'error': str(exc)}, status=400)
@@ -486,6 +515,16 @@ class ReservationCancel(APIView):
                     cancellation_fee=cancellation_fee,
                     cancelled_by=request.user,
                 )
+                if cancellation_fee > 0:
+                    fee_pm_id = request.data.get('cancellation_fee_payment_method')
+                    fee_pm    = PaymentMethod.objects.filter(pk=fee_pm_id).first() if fee_pm_id else None
+                    record_money_event(
+                        'cancellation_fee', cancellation_fee,
+                        payment_method=fee_pm,
+                        recorded_by=request.user,
+                        reservation=reservation,
+                        cancellation=cancellation,
+                    )
                 _create_cancellation_refund(cancellation, request, available_refund)
         except ValueError as exc:
             return Response({'error': str(exc)}, status=400)
@@ -566,6 +605,16 @@ class ReservationBulkCancel(APIView):
                         cancellation_fee=per_room_fee,
                         cancelled_by=request.user,
                     )
+                    if per_room_fee > 0:
+                        fee_pm_id = request.data.get('cancellation_fee_payment_method')
+                        fee_pm    = PaymentMethod.objects.filter(pk=fee_pm_id).first() if fee_pm_id else None
+                        record_money_event(
+                            'cancellation_fee', per_room_fee,
+                            payment_method=fee_pm,
+                            recorded_by=request.user,
+                            reservation=res,
+                            cancellation=c,
+                        )
                     if first_cancellation is None:
                         first_cancellation = c
 
@@ -605,6 +654,15 @@ class ReservationConvert(APIView):
                     processed_by=request.user,
                     note='Group advance applied at check-in',
                 )
+                pm = PaymentMethod.objects.filter(pk=apply_method_id).first()
+                record_money_event(
+                    'advance_applied', apply_advance,
+                    payment_method=pm,
+                    recorded_by=request.user,
+                    stay_log=stay_log,
+                    reservation=reservation,
+                    note='Group advance applied at check-in',
+                )
 
         return Response({'success_message': 'Reservation converted to check-in.'})
 
@@ -626,6 +684,12 @@ class ReservationGroupAdvance(APIView):
             amount=amount,
             payment_method=payment_method,
             processed_by=request.user,
+            note=request.data.get('note', '').strip(),
+        )
+        record_money_event(
+            'reservation_advance', amount,
+            payment_method=payment_method,
+            recorded_by=request.user,
             note=request.data.get('note', '').strip(),
         )
         return Response({'id': rp.id, 'amount': str(rp.amount)}, status=201)
@@ -702,7 +766,7 @@ class StayLogAmenityListCreate(generics.ListCreateAPIView):
         return StayLogAmenity.objects.filter(stay_log_id=self.kwargs['log_id']).select_related('amenity')
 
     def perform_create(self, serializer):
-        serializer.save(stay_log_id=self.kwargs['log_id'])
+        serializer.save(stay_log_id=self.kwargs['log_id'], added_by=self.request.user)
 
 
 class StayLogAmenityDetail(generics.RetrieveUpdateDestroyAPIView):
@@ -1498,9 +1562,10 @@ class UserPermissionsView(APIView):
             'view_pipeline_report',
             'view_pl_report',
             'view_staff_sales_report',
-            'view_cash_reconciliation',
             'view_expense_report',
             'view_reservationreminder',
+            'view_daily_settlement',
+            'manage_daily_settlement',
         ]
         admin_perms = [
             'add_user',
@@ -1628,13 +1693,28 @@ class StayLogPaymentListCreate(generics.ListCreateAPIView):
         return Payment.objects.filter(stay_log_id=self.kwargs['log_id']).select_related('processed_by')
 
     def perform_create(self, serializer):
-        serializer.save(stay_log_id=self.kwargs['log_id'], processed_by=self.request.user)
+        payment = serializer.save(stay_log_id=self.kwargs['log_id'], processed_by=self.request.user)
+        record_money_event(
+            'payment_received', payment.amount,
+            payment_method=payment.payment_method,
+            recorded_by=self.request.user,
+            stay_log=payment.stay_log,
+            note=payment.note,
+        )
 
 
 class StayLogPaymentDetail(generics.RetrieveDestroyAPIView):
     queryset = Payment.objects.all()
     serializer_class = PaymentSerializer
     permission_classes = [IsAuthenticated]
+
+    def perform_destroy(self, instance):
+        try:
+            assert_date_not_settled(instance.created_on.date())
+        except ValueError as e:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError(str(e))
+        instance.delete()
 
 
 # -----------  Cash Withdrawal views  -----------
@@ -1647,7 +1727,14 @@ class CashWithdrawalListCreate(generics.ListCreateAPIView):
         return CashWithdrawal.objects.select_related('requested_by').order_by('-created_on')
 
     def perform_create(self, serializer):
-        serializer.save(requested_by=self.request.user)
+        withdrawal = serializer.save(requested_by=self.request.user)
+        event_type = 'cash_deposit' if withdrawal.entry_type == 'credit' else 'cash_withdrawal'
+        record_money_event(
+            event_type, withdrawal.amount,
+            recorded_by=self.request.user,
+            date=withdrawal.date,
+            note=withdrawal.reason,
+        )
 
 
 class CashWithdrawalDetail(generics.RetrieveUpdateAPIView):
@@ -1679,13 +1766,28 @@ class ExpenseListCreate(generics.ListCreateAPIView):
         return qs
 
     def perform_create(self, serializer):
-        serializer.save(recorded_by=self.request.user)
+        expense = serializer.save(recorded_by=self.request.user)
+        record_money_event(
+            'expense_paid', expense.amount,
+            payment_method=expense.payment_method,
+            recorded_by=self.request.user,
+            date=expense.date,
+            note=expense.description,
+        )
 
 
 class ExpenseDetail(generics.RetrieveUpdateDestroyAPIView):
     queryset = Expense.objects.all()
     serializer_class = ExpenseSerializer
     permission_classes = [IsAuthenticated]
+
+    def perform_destroy(self, instance):
+        try:
+            assert_date_not_settled(instance.date)
+        except ValueError as e:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError(str(e))
+        instance.delete()
 
 
 class ExpenseAttachmentCreate(APIView):
@@ -1711,6 +1813,18 @@ class ExpenseAttachmentDelete(APIView):
         att.file.delete(save=False)
         att.delete()
         return Response(status=204)
+
+
+class StayNoteListCreate(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        stay = get_object_or_404(RoomStayLogs, pk=pk)
+        text = request.data.get('text', '').strip()
+        if not text:
+            return Response({'error': 'text is required.'}, status=400)
+        note = StayNote.objects.create(stay_log=stay, text=text, created_by=request.user)
+        return Response(StayNoteSerializer(note).data, status=201)
 
 
 class StayVehicleCreate(APIView):
@@ -1750,6 +1864,13 @@ class FoodOrderListCreate(APIView):
         if order.is_paid:
             order.paid_by = request.user
             order.save(update_fields=['paid_by'])
+            record_money_event(
+                'food_payment', order.amount,
+                payment_method=order.payment_method,
+                recorded_by=request.user,
+                stay_log=stay,
+                food_order=order,
+            )
         return Response(FoodOrderSerializer(order, context={'request': request}).data, status=201)
 
 
@@ -1758,12 +1879,21 @@ class FoodOrderDetail(APIView):
 
     def patch(self, request, pk):
         order = get_object_or_404(FoodOrder, pk=pk)
+        was_paid = order.is_paid
         serializer = FoodOrderSerializer(order, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         updated = serializer.save()
         if updated.is_paid and not updated.paid_by:
             updated.paid_by = request.user
             updated.save(update_fields=['paid_by'])
+        if updated.is_paid and not was_paid:
+            record_money_event(
+                'food_payment', updated.amount,
+                payment_method=updated.payment_method,
+                recorded_by=request.user,
+                stay_log=updated.stay_log,
+                food_order=updated,
+            )
         return Response(FoodOrderSerializer(updated, context={'request': request}).data)
 
     def delete(self, request, pk):
@@ -1898,58 +2028,6 @@ class StaffSalesView(APIView):
             'by_payment_type': {k: float(v) for k, v in overall_by_type.items()},
         })
 
-
-class CashReconciliationView(APIView):
-    permission_classes = [report_permission('view_cash_reconciliation')]
-
-    def get(self, request):
-        today = timezone.localdate()
-        start = _parse_date(request.query_params.get('start_date'), today - timedelta(days=30))
-        end = _parse_date(request.query_params.get('end_date'), today)
-
-        cash_payments = Payment.objects.filter(
-            payment_method__name__iexact='cash',
-            created_on__date__gte=start,
-            created_on__date__lte=end,
-        )
-        cash_in = sum(p.amount for p in cash_payments)
-
-        withdrawals = CashWithdrawal.objects.filter(
-            date__gte=start,
-            date__lte=end,
-        ).select_related('requested_by')
-        total_withdrawals = sum(w.amount for w in withdrawals)
-
-        cash_expenses = Expense.objects.filter(
-            payment_method__name__iexact='cash',
-            date__gte=start,
-            date__lte=end,
-        ).select_related('recorded_by')
-        total_cash_expenses = sum(e.amount for e in cash_expenses)
-
-        withdrawals_list = [
-            {
-                'id': w.id, 'date': w.date.isoformat(), 'amount': float(w.amount),
-                'reason': w.reason, 'requested_by': w.requested_by.get_full_name() or w.requested_by.username if w.requested_by else None,
-            }
-            for w in withdrawals
-        ]
-        expenses_list = [
-            {
-                'id': e.id, 'date': e.date.isoformat(), 'amount': float(e.amount),
-                'description': e.description, 'recorded_by': e.recorded_by.get_full_name() or e.recorded_by.username if e.recorded_by else None,
-            }
-            for e in cash_expenses
-        ]
-
-        return Response({
-            'cash_in': float(cash_in),
-            'withdrawals': float(total_withdrawals),
-            'cash_expenses': float(total_cash_expenses),
-            'net_cash': float(cash_in) - float(total_withdrawals) - float(total_cash_expenses),
-            'withdrawals_list': withdrawals_list,
-            'expenses_list': expenses_list,
-        })
 
 
 class ExpenseReportView(APIView):
@@ -2175,10 +2253,21 @@ class StayLogHistory(generics.ListAPIView):
 
     def get_queryset(self):
         qs = RoomStayLogs.objects.filter(check_out__isnull=False) \
-            .select_related('room', 'group', 'checked_in_by') \
-            .prefetch_related('group__customers__customer', 'amenities__amenity',
-                              'payments__processed_by', 'nc_requests',
-                              'food_orders__payment_method', 'food_orders__receipts', 'food_orders__ordered_by') \
+            .select_related('room', 'group', 'checked_in_by', 'checked_out_by') \
+            .prefetch_related(
+                'group__customers__customer',
+                'amenities__amenity',
+                'amenities__added_by',
+                'payments__processed_by',
+                'payments__payment_method',
+                'nc_requests',
+                'food_orders__payment_method',
+                'food_orders__receipts',
+                'food_orders__ordered_by',
+                'notes__created_by',
+                'vehicles',
+                'cancellations__cancelled_by',
+            ) \
             .order_by('-check_out')
 
         search = self.request.query_params.get('search', '').strip()
@@ -2232,3 +2321,152 @@ class ReservationReminderDetail(generics.RetrieveUpdateDestroyAPIView):
         if request.data.get('is_dismissed'):
             instance.dismissed_by.add(request.user)
         return Response(self.get_serializer(instance).data)
+
+
+# -----------  Settlement views  -----------
+
+class SettlementView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def _check_view_permission(self, user):
+        return user.is_superuser or user.has_perm('management.view_daily_settlement')
+
+    def _check_manage_permission(self, user):
+        return user.is_superuser or user.has_perm('management.manage_daily_settlement')
+
+    def get(self, request, date_str):
+        if not self._check_view_permission(request.user):
+            return Response({'error': 'Permission denied.'}, status=403)
+        try:
+            date_val = date_type.fromisoformat(date_str)
+        except ValueError:
+            return Response({'error': 'Invalid date. Use YYYY-MM-DD.'}, status=400)
+
+        settlement, _ = DailySettlement.objects.get_or_create(date=date_val)
+        snap = compute_settlement_snapshot(date_val)
+
+        if settlement.status == 'settled':
+            breakdowns = list(
+                settlement.method_breakdowns
+                .select_related('payment_method')
+                .order_by('payment_method__name')
+            )
+            method_data = [
+                {
+                    'payment_method_id':   b.payment_method_id,
+                    'payment_method_name': b.payment_method.name,
+                    'system_inflow':       int(b.system_inflow),
+                    'system_outflow':      int(b.system_outflow),
+                    'system_net':          int(b.system_inflow - b.system_outflow),
+                    'actual_received':     int(b.actual_received) if b.actual_received is not None else None,
+                    'difference':          int(b.actual_received - (b.system_inflow - b.system_outflow)) if b.actual_received is not None else None,
+                }
+                for b in breakdowns
+            ]
+            totals = {
+                'room_payments':            int(settlement.snap_room_payments),
+                'food_payments':            int(settlement.snap_food_payments),
+                'reservation_advances':     int(settlement.snap_reservation_advances),
+                'direct_cancellation_fees': int(settlement.snap_direct_cancellation_fees),
+                'cash_deposits':            int(settlement.snap_cash_deposits),
+                'withheld_cancellation_fees': int(snap['withheld_cancellation_fees']),
+                'expenses':                 int(settlement.snap_expenses),
+                'withdrawals':              int(settlement.snap_withdrawals),
+                'refunds':                  int(settlement.snap_refunds),
+                'total_inflow':             int(settlement.snap_total_inflow),
+                'total_outflow':            int(settlement.snap_total_outflow),
+                'net':                      int(settlement.snap_net),
+            }
+        else:
+            method_data = [
+                {
+                    'payment_method_id':   pm_id,
+                    'payment_method_name': data['name'],
+                    'system_inflow':       int(data['inflow']),
+                    'system_outflow':      int(data['outflow']),
+                    'system_net':          int(data['inflow'] - data['outflow']),
+                    'actual_received':     None,
+                    'difference':          None,
+                }
+                for pm_id, data in sorted(snap['by_method'].items(), key=lambda x: x[1]['name'])
+            ]
+            totals = {
+                'room_payments':            int(snap['room_payments']),
+                'food_payments':            int(snap['food_payments']),
+                'reservation_advances':     int(snap['reservation_advances']),
+                'direct_cancellation_fees': int(snap['direct_cancellation_fees']),
+                'cash_deposits':            int(snap['cash_deposits']),
+                'withheld_cancellation_fees': int(snap['withheld_cancellation_fees']),
+                'expenses':                 int(snap['expenses']),
+                'withdrawals':              int(snap['withdrawals']),
+                'refunds':                  int(snap['refunds']),
+                'total_inflow':             int(snap['total_inflow']),
+                'total_outflow':            int(snap['total_outflow']),
+                'net':                      int(snap['net']),
+            }
+
+        return Response({
+            'id':                settlement.id,
+            'date':              str(settlement.date),
+            'status':            settlement.status,
+            'totals':            totals,
+            'method_breakdowns': method_data,
+            'settled_by':        settlement.settled_by.username if settlement.settled_by else None,
+            'settled_at':        settlement.settled_at.isoformat() if settlement.settled_at else None,
+            'notes':             settlement.notes,
+            'events':            [serialize_event(e) for e in snap['events']],
+        })
+
+    def post(self, request, date_str):
+        """Settle the day: freeze snapshot and record actuals."""
+        if not self._check_manage_permission(request.user):
+            return Response({'error': 'Permission denied.'}, status=403)
+        try:
+            date_val = date_type.fromisoformat(date_str)
+        except ValueError:
+            return Response({'error': 'Invalid date. Use YYYY-MM-DD.'}, status=400)
+
+        if date_val >= timezone.localdate():
+            return Response({'error': 'Cannot settle today or a future date.'}, status=400)
+
+        settlement, _ = DailySettlement.objects.get_or_create(date=date_val)
+        if settlement.status == 'settled':
+            return Response({'error': 'Already settled.'}, status=400)
+
+        snap    = compute_settlement_snapshot(date_val)
+        actuals = request.data.get('actuals', [])
+        notes   = request.data.get('notes', '').strip()
+
+        with transaction.atomic():
+            settlement.snap_room_payments            = snap['room_payments']
+            settlement.snap_food_payments            = snap['food_payments']
+            settlement.snap_reservation_advances     = snap['reservation_advances']
+            settlement.snap_direct_cancellation_fees = snap['direct_cancellation_fees']
+            settlement.snap_cash_deposits            = snap['cash_deposits']
+            settlement.snap_total_inflow             = snap['total_inflow']
+            settlement.snap_expenses                 = snap['expenses']
+            settlement.snap_withdrawals              = snap['withdrawals']
+            settlement.snap_refunds                  = snap['refunds']
+            settlement.snap_total_outflow            = snap['total_outflow']
+            settlement.snap_net                      = snap['net']
+            settlement.status                        = 'settled'
+            settlement.settled_by                    = request.user
+            settlement.settled_at                    = timezone.now()
+            settlement.notes                         = notes
+            settlement.save()
+
+            for item in actuals:
+                pm_id  = item.get('payment_method_id')
+                actual = _parse_money(item.get('actual_received'))
+                pm_snap = snap['by_method'].get(pm_id, {'inflow': Decimal('0'), 'outflow': Decimal('0')})
+                SettlementMethodBreakdown.objects.update_or_create(
+                    settlement=settlement,
+                    payment_method_id=pm_id,
+                    defaults={
+                        'system_inflow':   pm_snap['inflow'],
+                        'system_outflow':  pm_snap['outflow'],
+                        'actual_received': actual,
+                    },
+                )
+
+        return Response({'success_message': f'Settlement for {date_val} completed.'})

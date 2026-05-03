@@ -44,13 +44,13 @@ const CashDrawer           = lazy(() => import('./pages/CashDrawer'));
 const Expenses             = lazy(() => import('./pages/Expenses'));
 const ProfitLoss           = lazy(() => import('./pages/finance/ProfitLoss'));
 const StaffSales           = lazy(() => import('./pages/finance/StaffSales'));
-const CashReconciliation   = lazy(() => import('./pages/finance/CashReconciliation'));
 const ExpenseReport        = lazy(() => import('./pages/finance/ExpenseReport'));
 const History              = lazy(() => import('./pages/History'));
 const GSTReport            = lazy(() => import('./pages/GSTReport'));
 const BulkBooking          = lazy(() => import('./pages/BulkBookingModal'));
 const Reservations         = lazy(() => import('./pages/Reservations'));
 const CancellationReport   = lazy(() => import('./pages/CancellationReport'));
+const Settlement           = lazy(() => import('./pages/Settlement'));
 import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
 import { useState, useEffect } from 'react';
 import usePermissions from './hooks/usePermissions';
@@ -108,7 +108,7 @@ function AppLayout() {
   const reportsActive = path.startsWith('/reports');
   const financeActive = path.startsWith('/finance');
   const adminActive = path.startsWith('/admin');
-  const hasAnyFinance = permissions.view_pl_report || permissions.view_staff_sales_report || permissions.view_cash_reconciliation || permissions.view_expense_report || permissions.is_superuser;
+  const hasAnyFinance = permissions.view_pl_report || permissions.view_staff_sales_report || permissions.view_expense_report || permissions.view_daily_settlement || permissions.is_superuser;
 
   const initials = firstName
     ? firstName.slice(0, 2).toUpperCase()
@@ -418,15 +418,6 @@ function AppLayout() {
                 active={path === '/finance/staff-sales'}
               />
             )}
-            {(permissions.view_cash_reconciliation || permissions.is_superuser) && (
-              <NavLink
-                {...NL}
-                label={nl('Cash Reconciliation')}
-                leftSection={<IconCash size={14} color="rgba(255,255,255,0.6)" />}
-                onClick={() => { navigate('/finance/cash-reconciliation'); closeNav(); }}
-                active={path === '/finance/cash-reconciliation'}
-              />
-            )}
             {(permissions.view_expense_report || permissions.is_superuser) && (
               <NavLink
                 {...NL}
@@ -434,6 +425,15 @@ function AppLayout() {
                 leftSection={<IconReceipt size={14} color="rgba(255,255,255,0.6)" />}
                 onClick={() => { navigate('/finance/expense-report'); closeNav(); }}
                 active={path === '/finance/expense-report'}
+              />
+            )}
+            {(permissions.view_daily_settlement || permissions.is_superuser) && (
+              <NavLink
+                {...NL}
+                label={nl('Daily Settlement')}
+                leftSection={<IconCash size={14} color="rgba(255,255,255,0.6)" />}
+                onClick={() => { navigate('/settlement'); closeNav(); }}
+                active={path === '/settlement'}
               />
             )}
           </NavLink>
@@ -612,11 +612,11 @@ function AppLayout() {
           <Route path="/expenses" element={<Expenses />} />
           <Route path="/finance/pl" element={<ProfitLoss />} />
           <Route path="/finance/staff-sales" element={<StaffSales />} />
-          <Route path="/finance/cash-reconciliation" element={<CashReconciliation />} />
           <Route path="/finance/expense-report" element={<ExpenseReport />} />
           <Route path="/history" element={<History />} />
           <Route path="/reports/gst" element={<GSTReport />} />
           <Route path="/reports/cancellations" element={<CancellationReport />} />
+          <Route path="/settlement" element={<Settlement />} />
           <Route path="/admin/users" element={<UserManagement />} />
           <Route path="/admin/groups" element={<GroupManagement />} />
           <Route path="/admin/permissions" element={<PermissionOverview />} />
