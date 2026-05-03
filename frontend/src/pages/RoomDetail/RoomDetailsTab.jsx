@@ -52,12 +52,36 @@ export default function RoomDetailsTab({ room }) {
     onError: (e) => notifyError(parseApiError(e, 'Failed to delete room.')),
   });
 
+  const toggleActiveMutation = useMutation({
+    mutationFn: () => api.post(`/v1/room/${room.id}/toggle-active/`),
+    onSuccess: (res) => {
+      qc.invalidateQueries(QUERY_KEYS.room(room.id));
+      qc.invalidateQueries(QUERY_KEYS.rooms);
+      notifySuccess(res.data.success_message);
+    },
+    onError: (e) => notifyError(parseApiError(e, 'Failed to update room.')),
+  });
+
   const handleDelete = () => modals.openConfirmModal({
     title: 'Delete Room',
     children: <Text size="sm">This will permanently delete Room {room.room_number}. This cannot be undone.</Text>,
     labels: { confirm: 'Delete', cancel: 'Cancel' },
     confirmProps: { color: 'red' },
     onConfirm: () => deleteMutation.mutate(),
+  });
+
+  const handleToggleActive = () => modals.openConfirmModal({
+    title: room.is_active ? 'Deactivate Room' : 'Activate Room',
+    children: (
+      <Text size="sm">
+        {room.is_active
+          ? `Deactivating Room ${room.room_number} will hide it from check-in and reservation flows. Continue?`
+          : `Reactivate Room ${room.room_number}?`}
+      </Text>
+    ),
+    labels: { confirm: room.is_active ? 'Deactivate' : 'Activate', cancel: 'Cancel' },
+    confirmProps: { color: room.is_active ? 'orange' : 'teal' },
+    onConfirm: () => toggleActiveMutation.mutate(),
   });
 
   return (
@@ -83,9 +107,19 @@ export default function RoomDetailsTab({ room }) {
         />
         <Group justify="space-between">
           <Button type="submit" loading={saveMutation.isPending}>Save</Button>
-          <Button color="red" variant="light" onClick={handleDelete} loading={deleteMutation.isPending}>
-            Delete Room
-          </Button>
+          <Group gap="xs">
+            <Button
+              color={room.is_active ? 'orange' : 'teal'}
+              variant="light"
+              onClick={handleToggleActive}
+              loading={toggleActiveMutation.isPending}
+            >
+              {room.is_active ? 'Deactivate Room' : 'Activate Room'}
+            </Button>
+            <Button color="red" variant="light" onClick={handleDelete} loading={deleteMutation.isPending}>
+              Delete Room
+            </Button>
+          </Group>
         </Group>
       </form>
     </Card>

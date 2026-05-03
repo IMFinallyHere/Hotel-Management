@@ -36,6 +36,7 @@ export default function CancellationReport() {
 
   const totalFees = data.reduce((s, r) => s + Number(r.cancellation_fee), 0);
   const totalWaived = data.reduce((s, r) => s + Number(r.waived_amount ?? 0), 0);
+  const totalRefunded = data.reduce((s, r) => s + Number(r.refund?.amount ?? 0), 0);
 
   return (
     <Stack gap="md">
@@ -80,6 +81,7 @@ export default function CancellationReport() {
           <Group gap="lg">
             <Text size="sm" c="dimmed">{data.length} cancellation{data.length !== 1 ? 's' : ''}</Text>
             <Text size="sm" c="dimmed">Fees collected: <Text span fw={600} c="dark">₹{totalFees.toLocaleString()}</Text></Text>
+            <Text size="sm" c="dimmed">Refunded: <Text span fw={600} c="red">₹{totalRefunded.toLocaleString()}</Text></Text>
             {totalWaived > 0 && (
               <Text size="sm" c="dimmed">Total waived: <Text span fw={600} c="orange">₹{totalWaived.toLocaleString()}</Text></Text>
             )}
@@ -95,6 +97,8 @@ export default function CancellationReport() {
                 <Table.Th>Reason</Table.Th>
                 <Table.Th>Default Fee (₹)</Table.Th>
                 <Table.Th>Charged (₹)</Table.Th>
+                <Table.Th>Refund (₹)</Table.Th>
+                <Table.Th>Refund Method</Table.Th>
                 <Table.Th>Waived (₹)</Table.Th>
                 <Table.Th>Cancelled By</Table.Th>
               </Table.Tr>
@@ -121,6 +125,14 @@ export default function CancellationReport() {
                   </Table.Td>
                   <Table.Td>₹{Number(row.default_fee).toLocaleString()}</Table.Td>
                   <Table.Td>₹{Number(row.cancellation_fee).toLocaleString()}</Table.Td>
+                  <Table.Td>
+                    {row.refund ? (
+                      <Tooltip label={row.refund.note || `Processed by ${row.refund.processed_by_name ?? '—'}`}>
+                        <Text size="sm" c="red" fw={600}>₹{Number(row.refund.amount).toLocaleString()}</Text>
+                      </Tooltip>
+                    ) : '—'}
+                  </Table.Td>
+                  <Table.Td>{row.refund?.payment_method_name ?? '—'}</Table.Td>
                   <Table.Td>
                     {Number(row.waived_amount) > 0 ? (
                       <Tooltip label={`Waived by ${row.cancelled_by_name ?? '—'}`}>

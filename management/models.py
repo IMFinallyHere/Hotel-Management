@@ -63,6 +63,7 @@ class Rooms(models.Model):
     status = models.CharField(choices=ROOM_STATUS, max_length=15, default='available')
     cancellation_fee = models.DecimalField(max_digits=7, decimal_places=0, default=0)
     overtime_fee = models.DecimalField(max_digits=7, decimal_places=0, default=0)
+    is_active = models.BooleanField(default=True)
 
     def is_occupied(self) -> bool:
         return self.logs.filter(check_out=None).exists()
@@ -140,6 +141,17 @@ class Reservation(models.Model):
     advance_payment_method = models.ForeignKey(PaymentMethod, models.SET_NULL, null=True, blank=True, related_name='reservations')
     created_on = models.DateTimeField(auto_now_add=True)
     is_cancelled = models.BooleanField(default=False)
+    is_converted = models.BooleanField(default=False)
+    applied_advance = models.DecimalField(max_digits=10, decimal_places=0, default=0)
+
+
+class ReservationPayment(models.Model):
+    group = models.ForeignKey(Group, models.CASCADE, related_name='reservation_payments')
+    amount = models.DecimalField(max_digits=10, decimal_places=0)
+    payment_method = models.ForeignKey(PaymentMethod, models.PROTECT, related_name='reservation_payments')
+    processed_by = models.ForeignKey(User, models.SET_NULL, null=True, blank=True, related_name='reservation_payments_processed')
+    note = models.CharField(max_length=200, blank=True)
+    created_on = models.DateTimeField(auto_now_add=True)
 
 
 class ReservationReminder(models.Model):
@@ -269,3 +281,12 @@ class CancellationLog(models.Model):
     cancellation_fee = models.DecimalField(max_digits=7, decimal_places=0, default=0)
     cancelled_by = models.ForeignKey(User, models.SET_NULL, null=True, related_name='cancellations_made')
     cancelled_on = models.DateTimeField(auto_now_add=True)
+
+
+class CancellationRefund(models.Model):
+    cancellation = models.OneToOneField(CancellationLog, models.CASCADE, related_name='refund')
+    amount = models.DecimalField(max_digits=10, decimal_places=0)
+    payment_method = models.ForeignKey(PaymentMethod, models.PROTECT, related_name='cancellation_refunds')
+    processed_by = models.ForeignKey(User, models.SET_NULL, null=True, related_name='cancellation_refunds_processed')
+    note = models.CharField(max_length=200, blank=True)
+    created_on = models.DateTimeField(auto_now_add=True)

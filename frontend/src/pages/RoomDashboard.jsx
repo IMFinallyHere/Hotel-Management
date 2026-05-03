@@ -13,6 +13,7 @@ import usePermissions from '../hooks/usePermissions';
 import { parseConfigs, isLogOvertime } from '../utils/configUtils';
 
 function getRoomStatus(room, occupiedIds, reservedIds, overtimeIds) {
+  if (room.is_active === false) return 'inactive';
   if (overtimeIds.has(room.id)) return 'overtime';
   if (occupiedIds.has(room.id)) return 'occupied';
   if (room.status === 'cleaning') return 'cleaning';
@@ -22,6 +23,7 @@ function getRoomStatus(room, occupiedIds, reservedIds, overtimeIds) {
 }
 
 const STATUS_CONFIG = {
+  inactive:     { color: 'gray',   label: 'Inactive' },
   overtime:     { color: 'yellow', label: 'Overtime' },
   occupied:     { color: 'red',    label: 'Occupied' },
   cleaning:     { color: 'violet', label: 'Cleaning' },
@@ -116,7 +118,9 @@ export default function RoomDashboard() {
   const filteredRooms = rooms.filter(room => {
     if (search && !room.room_number.toLowerCase().includes(search.toLowerCase())) return false;
     if (vehicleMatchRoomIds && !vehicleMatchRoomIds.has(room.id)) return false;
-    if (statusFilter !== 'all' && getRoomStatus(room, occupiedIds, reservedIds, overtimeIds) !== statusFilter) return false;
+    const roomStatus = getRoomStatus(room, occupiedIds, reservedIds, overtimeIds);
+    if (statusFilter === 'all' && roomStatus === 'inactive') return false;
+    if (statusFilter !== 'all' && roomStatus !== statusFilter) return false;
     return true;
   });
 
@@ -125,11 +129,12 @@ export default function RoomDashboard() {
   }
 
   const statusCounts = {
-    all:          rooms.length,
-    available:    rooms.filter(r => !occupiedIds.has(r.id) && !reservedIds.has(r.id) && r.status === 'available').length,
-    cleaning:     rooms.filter(r => !occupiedIds.has(r.id) && r.status === 'cleaning').length,
-    out_of_order: rooms.filter(r => !occupiedIds.has(r.id) && r.status === 'out_of_order').length,
-    reserved:     [...reservedIds].filter(id => !occupiedIds.has(id) && rooms.find(r => r.id === id)?.status === 'available').length,
+    all:          rooms.filter(r => r.is_active !== false).length,
+    inactive:     rooms.filter(r => r.is_active === false).length,
+    available:    rooms.filter(r => r.is_active !== false && !occupiedIds.has(r.id) && !reservedIds.has(r.id) && r.status === 'available').length,
+    cleaning:     rooms.filter(r => r.is_active !== false && !occupiedIds.has(r.id) && r.status === 'cleaning').length,
+    out_of_order: rooms.filter(r => r.is_active !== false && !occupiedIds.has(r.id) && r.status === 'out_of_order').length,
+    reserved:     [...reservedIds].filter(id => !occupiedIds.has(id) && rooms.find(r => r.id === id)?.status === 'available' && rooms.find(r => r.id === id)?.is_active !== false).length,
     occupied:     [...occupiedIds].filter(id => !overtimeIds.has(id)).length,
     overtime:     overtimeIds.size,
   };
@@ -146,7 +151,7 @@ export default function RoomDashboard() {
           )}
           {(permissions.add_roomstaylogs || permissions.is_superuser) && (
             <Button leftSection={<IconCalendarPlus size={16} />} color="teal" onClick={() => navigate('/bulk-booking')}>
-              Bulk Booking
+              New Booking
             </Button>
           )}
         </Group>
@@ -166,6 +171,7 @@ export default function RoomDashboard() {
             { value: 'reserved',     label: `Reserved (${statusCounts.reserved})` },
             { value: 'occupied',     label: `Occupied (${statusCounts.occupied})` },
             { value: 'overtime',     label: `Overtime (${statusCounts.overtime})` },
+            { value: 'inactive',     label: `Inactive (${statusCounts.inactive})` },
           ]}
         />
       </ScrollArea>

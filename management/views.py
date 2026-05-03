@@ -7,15 +7,72 @@ from rest_framework import generics
 from rest_framework.views import APIView
 from django.db.models import Q, Count
 from django.db.models import ProtectedError
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, Group, CustomerGroup, RoomsPriceChart, Reservation, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, ExpenseAttachment, RoomStatusLog, PaymentMethod, StayVehicle, FoodOrder, FoodOrderReceipt, CancellationLog
+from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, Group, CustomerGroup, RoomsPriceChart, Reservation, ReservationPayment, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, ExpenseAttachment, RoomStatusLog, PaymentMethod, StayVehicle, FoodOrder, FoodOrderReceipt, CancellationLog, CancellationRefund
 from .serializers import RoomSerializer, RoomTypeSerializer, CountryCodeSerializer, CustomerSerializer, ConfigurationSerializer, CheckinSerializer, GroupCustomerSerializer, RoomsPriceChartSerializer, StayLogSerializer, StayLogUpdateSerializer, ReservationSerializer, ReservationReminderSerializer, AmenitySerializer, StayLogAmenitySerializer, ActiveStayLogSerializer, RoomNCRequestSerializer, PaymentSerializer, CashWithdrawalSerializer, ExpenseSerializer, ExpenseAttachmentSerializer, ExtendStaySerializer, GraceSerializer, ShiftRoomSerializer, RoomStatusLogSerializer, PaymentMethodSerializer, StayVehicleSerializer, FoodOrderSerializer, FoodOrderReceiptSerializer, CancellationLogSerializer
 from .permissions import report_permission, HasModelPermission
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.permissions import DjangoModelPermissions
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes
+
+
+def _parse_money(value, default=Decimal('0')):
+    from decimal import InvalidOperation
+    if value in (None, ''):
+        return default
+    try:
+        amount = Decimal(str(value))
+    except InvalidOperation:
+        return default
+    return amount if amount >= 0 else default
+
+
+def _create_cancellation_refund(cancellation, request, available_amount):
+    refund_amount = _parse_money(request.data.get('refund_amount'))
+    if refund_amount <= 0:
+        return None
+    if refund_amount > available_amount:
+        raise ValueError(f'Refund cannot exceed received amount of ₹{available_amount}.')
+    payment_method_id = request.data.get('refund_payment_method')
+    if not payment_method_id:
+        raise ValueError('Refund payment method is required when refund amount is greater than 0.')
+    payment_method = get_object_or_404(PaymentMethod, pk=payment_method_id)
+    return CancellationRefund.objects.create(
+        cancellation=cancellation,
+        amount=refund_amount,
+        payment_method=payment_method,
+        processed_by=request.user,
+        note=request.data.get('refund_note', '').strip(),
+    )
+
+
+def _reservation_group_advance_summary(group_id):
+    advance_total = sum(p.amount for p in ReservationPayment.objects.filter(group_id=group_id))
+    cancellation_fee_total = sum(
+        c.cancellation_fee
+        for c in CancellationLog.objects.filter(group_id=group_id, cancellation_type='reservation')
+    )
+    refund_total = sum(
+        r.amount
+        for r in CancellationRefund.objects.filter(
+            cancellation__group_id=group_id,
+            cancellation__cancellation_type='reservation',
+        )
+    )
+    applied_total = sum(
+        r.applied_advance
+        for r in Reservation.objects.filter(group_id=group_id, is_converted=True)
+    )
+    return {
+        'advance_total': advance_total,
+        'refund_total': refund_total,
+        'cancellation_fee_total': cancellation_fee_total,
+        'applied_total': applied_total,
+        'advance_available': max(Decimal('0'), advance_total - refund_total - cancellation_fee_total - applied_total),
+    }
 
 
 class RoomTypeListCreate(generics.ListCreateAPIView):
@@ -37,7 +94,7 @@ class RoomTypeDetail(generics.RetrieveUpdateDestroyAPIView):
 
 
 class RoomListCreate(generics.ListCreateAPIView):
-    queryset = Rooms.objects.all()
+    queryset = Rooms.objects.all().order_by('room_number')
     serializer_class = RoomSerializer
     permission_classes = [DjangoModelPermissions]
 
@@ -67,6 +124,19 @@ class RoomDetail(generics.RetrieveUpdateDestroyAPIView):
                 status=400,
             )
         return super().destroy(request, *args, **kwargs)
+
+
+class RoomToggleActive(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        room = get_object_or_404(Rooms, pk=pk)
+        if room.is_occupied() and room.is_active:
+            return Response({'error': 'Cannot deactivate a room that is currently occupied.'}, status=400)
+        room.is_active = not room.is_active
+        room.save(update_fields=['is_active'])
+        state = 'activated' if room.is_active else 'deactivated'
+        return Response({'is_active': room.is_active, 'success_message': f'Room {state}.'})
 
 
 class RoomStatusLogList(generics.ListAPIView):
@@ -263,6 +333,26 @@ class ReservationListCreate(generics.ListCreateAPIView):
     serializer_class = ReservationSerializer
     permission_classes = [DjangoModelPermissions]
 
+    def perform_create(self, serializer):
+        reservation = serializer.save()
+        advance_amount = _parse_money(self.request.data.get('group_advance_amount', self.request.data.get('advance_amount')))
+        payment_method_id = self.request.data.get('group_advance_payment_method', self.request.data.get('advance_payment_method'))
+        if advance_amount > 0 and payment_method_id:
+            exists = ReservationPayment.objects.filter(
+                group=reservation.group,
+                amount=advance_amount,
+                payment_method_id=payment_method_id,
+                note='Reservation advance',
+            ).exists()
+            if not exists:
+                ReservationPayment.objects.create(
+                    group=reservation.group,
+                    amount=advance_amount,
+                    payment_method_id=payment_method_id,
+                    processed_by=self.request.user,
+                    note='Reservation advance',
+                )
+
     def get_queryset(self):
         qs = Reservation.objects.select_related('room', 'group').prefetch_related('group__customers__customer')
         p = self.request.query_params
@@ -287,7 +377,7 @@ class ReservationListCreate(generics.ListCreateAPIView):
         return qs.order_by('-check_in_date')
 
 
-class ReservationDetail(generics.RetrieveUpdateDestroyAPIView):
+class ReservationDetail(generics.RetrieveUpdateAPIView):
     queryset = Reservation.objects.all()
     serializer_class = ReservationSerializer
     permission_classes = [DjangoModelPermissions]
@@ -307,38 +397,46 @@ class CancelCheckin(APIView):
         reason = request.data.get('reason', '').strip()
         if not reason:
             return Response({'error': 'Reason is required.'}, status=400)
-        from decimal import InvalidOperation
         room = log.room
         default_fee = room.cancellation_fee or Decimal('0')
-        raw_fee = request.data.get('cancellation_fee')
-        try:
-            cancellation_fee = Decimal(str(raw_fee)) if raw_fee is not None else default_fee
-        except InvalidOperation:
-            cancellation_fee = default_fee
+        cancellation_fee = _parse_money(request.data.get('cancellation_fee'), default_fee)
+        total_received = sum(p.amount for p in log.payments.all())
+        refund_amount = _parse_money(request.data.get('refund_amount'))
+        if refund_amount > total_received:
+            return Response({'error': f'Refund cannot exceed received amount of ₹{total_received}.'}, status=400)
+        if cancellation_fee + refund_amount > total_received:
+            return Response({'error': f'Cancellation fee and refund cannot exceed received amount of ₹{total_received}.'}, status=400)
+        if refund_amount > 0 and not request.data.get('refund_payment_method'):
+            return Response({'error': 'Refund payment method is required when refund amount is greater than 0.'}, status=400)
 
-        log.check_out = timezone.now()
-        log.save()
-        old_status = room.status
-        room.status = 'cleaning'
-        room.save(update_fields=['status'])
-        RoomStatusLog.objects.create(
-            room=room,
-            old_status=old_status,
-            new_status='cleaning',
-            changed_by=request.user,
-            note='Auto-set after cancellation',
-        )
-        CancellationLog.objects.create(
-            cancellation_type='checkin',
-            stay_log=log,
-            room=room,
-            room_number=room.room_number,
-            group=log.group,
-            reason=reason,
-            default_fee=default_fee,
-            cancellation_fee=cancellation_fee,
-            cancelled_by=request.user,
-        )
+        try:
+            with transaction.atomic():
+                log.check_out = timezone.now()
+                log.save()
+                old_status = room.status
+                room.status = 'cleaning'
+                room.save(update_fields=['status'])
+                RoomStatusLog.objects.create(
+                    room=room,
+                    old_status=old_status,
+                    new_status='cleaning',
+                    changed_by=request.user,
+                    note='Auto-set after cancellation',
+                )
+                cancellation = CancellationLog.objects.create(
+                    cancellation_type='checkin',
+                    stay_log=log,
+                    room=room,
+                    room_number=room.room_number,
+                    group=log.group,
+                    reason=reason,
+                    default_fee=default_fee,
+                    cancellation_fee=cancellation_fee,
+                    cancelled_by=request.user,
+                )
+                _create_cancellation_refund(cancellation, request, total_received)
+        except ValueError as exc:
+            return Response({'error': str(exc)}, status=400)
         return Response({'success_message': 'Stay cancelled.'})
 
 
@@ -356,29 +454,181 @@ class ReservationCancel(APIView):
         reason = request.data.get('reason', '').strip()
         if not reason:
             return Response({'error': 'Reason is required.'}, status=400)
-        from decimal import InvalidOperation
         room = reservation.room
         default_fee = room.cancellation_fee or Decimal('0')
-        raw_fee = request.data.get('cancellation_fee')
-        try:
-            cancellation_fee = Decimal(str(raw_fee)) if raw_fee is not None else default_fee
-        except InvalidOperation:
-            cancellation_fee = default_fee
+        cancellation_fee = _parse_money(request.data.get('cancellation_fee'), default_fee)
+        summary = _reservation_group_advance_summary(reservation.group_id)
+        available_refund = summary['advance_available']
+        refund_amount = _parse_money(request.data.get('refund_amount'))
+        remaining_active = Reservation.objects.filter(group_id=reservation.group_id, is_cancelled=False).exclude(pk=reservation.pk).count()
+        if remaining_active > 0 and refund_amount > 0:
+            return Response({'error': 'Refunds are only allowed when cancelling the final active room in a group booking.'}, status=400)
+        if refund_amount > available_refund:
+            return Response({'error': f'Refund cannot exceed available group advance of ₹{available_refund}.'}, status=400)
+        max_refund_after_fee = max(Decimal('0'), available_refund - cancellation_fee)
+        if refund_amount > max_refund_after_fee:
+            return Response({'error': f'Refund cannot exceed available group advance after fee of ₹{max_refund_after_fee}.'}, status=400)
+        if refund_amount > 0 and not request.data.get('refund_payment_method'):
+            return Response({'error': 'Refund payment method is required when refund amount is greater than 0.'}, status=400)
 
-        reservation.is_cancelled = True
-        reservation.save(update_fields=['is_cancelled'])
-        CancellationLog.objects.create(
-            cancellation_type='reservation',
-            reservation=reservation,
-            room=room,
-            room_number=room.room_number,
-            group=reservation.group,
-            reason=reason,
-            default_fee=default_fee,
-            cancellation_fee=cancellation_fee,
-            cancelled_by=request.user,
-        )
+        try:
+            with transaction.atomic():
+                reservation.is_cancelled = True
+                reservation.save(update_fields=['is_cancelled'])
+                cancellation = CancellationLog.objects.create(
+                    cancellation_type='reservation',
+                    reservation=reservation,
+                    room=room,
+                    room_number=room.room_number,
+                    group=reservation.group,
+                    reason=reason,
+                    default_fee=default_fee,
+                    cancellation_fee=cancellation_fee,
+                    cancelled_by=request.user,
+                )
+                _create_cancellation_refund(cancellation, request, available_refund)
+        except ValueError as exc:
+            return Response({'error': str(exc)}, status=400)
         return Response({'success_message': 'Reservation cancelled.'})
+
+
+class ReservationBulkCancel(APIView):
+    permission_classes = [DjangoModelPermissions]
+
+    @staticmethod
+    def get_queryset():
+        return Reservation.objects.all()
+
+    def post(self, request):
+        ids = request.data.get('reservation_ids', [])
+        if not ids:
+            return Response({'error': 'No reservations selected.'}, status=400)
+
+        reason = request.data.get('reason', '').strip()
+        if not reason:
+            return Response({'error': 'Reason is required.'}, status=400)
+
+        reservations = list(Reservation.objects.filter(pk__in=ids).select_related('room'))
+        if len(reservations) != len(set(ids)):
+            return Response({'error': 'One or more reservations not found.'}, status=400)
+
+        invalid = [r for r in reservations if r.is_cancelled or r.is_converted]
+        if invalid:
+            return Response({'error': 'One or more reservations are already cancelled or converted.'}, status=400)
+
+        group_ids = set(r.group_id for r in reservations)
+        if len(group_ids) != 1:
+            return Response({'error': 'All selected reservations must belong to the same group.'}, status=400)
+
+        group_id = group_ids.pop()
+        summary = _reservation_group_advance_summary(group_id)
+        available_refund = summary['advance_available']
+
+        remaining_active = Reservation.objects.filter(
+            group_id=group_id, is_cancelled=False, is_converted=False
+        ).exclude(pk__in=ids).count()
+        is_full_cancel = remaining_active == 0
+
+        cancellation_fee_input = request.data.get('cancellation_fee')
+        per_room_fees = {}
+        total_fee = Decimal('0')
+        for res in reservations:
+            default_fee = res.room.cancellation_fee or Decimal('0')
+            fee = _parse_money(cancellation_fee_input, default_fee)
+            per_room_fees[res.id] = (fee, default_fee)
+            total_fee += fee
+
+        max_refund = max(Decimal('0'), available_refund - total_fee)
+        refund_amount = _parse_money(request.data.get('refund_amount', 0))
+
+        if not is_full_cancel and refund_amount > 0:
+            return Response({'error': 'Refunds are only allowed when cancelling all active rooms in the group.'}, status=400)
+        if refund_amount > max_refund:
+            return Response({'error': f'Refund cannot exceed available advance after fees of ₹{max_refund}.'}, status=400)
+        if refund_amount > 0 and not request.data.get('refund_payment_method'):
+            return Response({'error': 'Refund payment method is required.'}, status=400)
+
+        try:
+            with transaction.atomic():
+                first_cancellation = None
+                for res in reservations:
+                    per_room_fee, default_fee = per_room_fees[res.id]
+                    res.is_cancelled = True
+                    res.save(update_fields=['is_cancelled'])
+                    c = CancellationLog.objects.create(
+                        cancellation_type='reservation',
+                        reservation=res,
+                        room=res.room,
+                        room_number=res.room.room_number,
+                        group_id=group_id,
+                        reason=reason,
+                        default_fee=default_fee,
+                        cancellation_fee=per_room_fee,
+                        cancelled_by=request.user,
+                    )
+                    if first_cancellation is None:
+                        first_cancellation = c
+
+                if refund_amount > 0 and first_cancellation:
+                    _create_cancellation_refund(first_cancellation, request, max_refund)
+        except ValueError as exc:
+            return Response({'error': str(exc)}, status=400)
+
+        return Response({'success_message': f'{len(reservations)} reservation(s) cancelled.'})
+
+
+class ReservationConvert(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        reservation = get_object_or_404(Reservation, pk=pk)
+        if reservation.is_converted:
+            return Response({'error': 'Reservation already converted to check-in.'}, status=400)
+        if reservation.is_cancelled:
+            return Response({'error': 'Cannot convert a cancelled reservation.'}, status=400)
+
+        log_id = request.data.get('log_id')
+        apply_advance = _parse_money(request.data.get('apply_advance_amount', 0))
+        apply_method_id = request.data.get('apply_advance_payment_method')
+
+        with transaction.atomic():
+            reservation.is_converted = True
+            reservation.applied_advance = apply_advance
+            reservation.save(update_fields=['is_converted', 'applied_advance'])
+
+            if apply_advance > 0 and log_id and apply_method_id:
+                stay_log = get_object_or_404(RoomStayLogs, pk=log_id)
+                Payment.objects.create(
+                    stay_log=stay_log,
+                    payment_method_id=apply_method_id,
+                    amount=apply_advance,
+                    processed_by=request.user,
+                    note='Group advance applied at check-in',
+                )
+
+        return Response({'success_message': 'Reservation converted to check-in.'})
+
+
+class ReservationGroupAdvance(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, group_id):
+        group = get_object_or_404(Group, pk=group_id)
+        amount = _parse_money(request.data.get('amount', 0))
+        if amount <= 0:
+            return Response({'error': 'Amount must be greater than 0.'}, status=400)
+        method_id = request.data.get('payment_method')
+        if not method_id:
+            return Response({'error': 'Payment method is required.'}, status=400)
+        payment_method = get_object_or_404(PaymentMethod, pk=method_id)
+        rp = ReservationPayment.objects.create(
+            group=group,
+            amount=amount,
+            payment_method=payment_method,
+            processed_by=request.user,
+            note=request.data.get('note', '').strip(),
+        )
+        return Response({'id': rp.id, 'amount': str(rp.amount)}, status=201)
 
 
 class CancellationReportView(APIView):
@@ -389,6 +639,7 @@ class CancellationReportView(APIView):
             return Response({'error': 'Permission denied.'}, status=403)
         qs = CancellationLog.objects.select_related(
             'room', 'group', 'cancelled_by', 'stay_log', 'reservation',
+            'refund__payment_method', 'refund__processed_by',
         ).prefetch_related('group__customers__customer').order_by('-cancelled_on')
         p = request.query_params
         if p.get('from_date'):

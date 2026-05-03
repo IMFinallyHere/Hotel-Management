@@ -66,6 +66,8 @@ export default function RoomDetail() {
   const [cancelStayOpened, { open: openCancelStay, close: closeCancelStay }] = useDisclosure(false);
   const [cancelReason, setCancelReason] = useState('');
   const [cancelFee, setCancelFee] = useState(0);
+  const [cancelRefundPaymentMethod, setCancelRefundPaymentMethod] = useState(null);
+  const [cancelRefundNote, setCancelRefundNote] = useState('');
 
   const [overtimeFeeOpened, { open: openOvertimeFee, close: closeOvertimeFee }] = useDisclosure(false);
   const [overtimeFeeCharged, setOvertimeFeeCharged] = useState(0);
@@ -100,13 +102,21 @@ export default function RoomDetail() {
   });
 
   const cancelStayMutation = useMutation({
-    mutationFn: ({ logId, reason, cancellation_fee }) =>
-      api.post(`/v1/stay-logs/${logId}/cancel/`, { reason, cancellation_fee }),
+    mutationFn: ({ logId, reason, cancellation_fee, refund_amount, refund_payment_method, refund_note }) =>
+      api.post(`/v1/stay-logs/${logId}/cancel/`, {
+        reason,
+        cancellation_fee,
+        refund_amount,
+        refund_payment_method,
+        refund_note,
+      }),
     onSuccess: () => {
       qc.invalidateQueries(QUERY_KEYS.activeLogs);
       qc.invalidateQueries(QUERY_KEYS.rooms);
       closeCancelStay();
       setCancelReason('');
+      setCancelRefundPaymentMethod(null);
+      setCancelRefundNote('');
       notifySuccess('Stay cancelled. Room moved to cleaning.');
     },
     onError: (e) => notifyError(parseApiError(e, 'Failed to cancel stay.')),
@@ -140,7 +150,8 @@ export default function RoomDetail() {
 
   let statusColor = 'teal';
   let statusLabel = 'Available';
-  if (activeLog) { statusColor = 'red'; statusLabel = 'Occupied'; }
+  if (!room.is_active) { statusColor = 'gray'; statusLabel = 'Inactive'; }
+  else if (activeLog) { statusColor = 'red'; statusLabel = 'Occupied'; }
   else if (room.status === 'cleaning') { statusColor = 'violet'; statusLabel = 'Cleaning'; }
   else if (room.status === 'out_of_order') { statusColor = 'dark'; statusLabel = 'Out of Order'; }
   else if (nextReservation) { statusColor = 'orange'; statusLabel = 'Reserved'; }
@@ -196,6 +207,8 @@ export default function RoomDetail() {
   };
 
   const paymentTypeOptions = paymentMethods.filter(p => p.is_active).map(p => ({ value: String(p.id), label: p.name }));
+  const activeLogPaidTotal = activeLog ? (activeLog.payments || []).reduce((sum, p) => sum + Number(p.amount), 0) : 0;
+  const cancelRefundAmount = Math.max(0, activeLogPaidTotal - Number(cancelFee || 0));
 
   return (
     <div>
@@ -235,7 +248,11 @@ export default function RoomDetail() {
               variant="outline"
               onClick={() => {
                 setCancelReason('');
-                setCancelFee(Number(room.cancellation_fee ?? 0));
+                const fee = Number(room.cancellation_fee ?? 0);
+                const lastPayment = (activeLog.payments || []).slice(-1)[0];
+                setCancelFee(fee);
+                setCancelRefundPaymentMethod(lastPayment?.payment_method ? String(lastPayment.payment_method) : null);
+                setCancelRefundNote('');
                 openCancelStay();
               }}
             >
@@ -396,22 +413,57 @@ export default function RoomDetail() {
         />
         <NumberInput
           label="Cancellation Fee (₹)"
-          description="Leave at 0 to waive."
+          description="Amount retained from collected payments."
           min={0}
           value={cancelFee}
           onChange={setCancelFee}
+          mb="sm"
+        />
+        <NumberInput
+          label="Refund Amount (₹)"
+          description={`Payments collected: ₹${activeLogPaidTotal.toLocaleString()} · Cancellation fee retained: ₹${Number(cancelFee || 0).toLocaleString()}`}
+          value={cancelRefundAmount}
+          readOnly
+          hideControls
+          styles={{
+            input: {
+              backgroundColor: 'var(--mantine-color-gray-1)',
+              color: 'var(--mantine-color-dark-7)',
+              fontWeight: 600,
+            },
+          }}
+          mb="sm"
+        />
+        <Select
+          label="Refund Method"
+          placeholder="Select payment method"
+          data={paymentTypeOptions}
+          value={cancelRefundPaymentMethod}
+          onChange={setCancelRefundPaymentMethod}
+          disabled={!cancelRefundAmount}
+          mb="sm"
+        />
+        <Textarea
+          label="Refund Note"
+          placeholder="Optional note..."
+          value={cancelRefundNote}
+          onChange={(e) => setCancelRefundNote(e.currentTarget.value)}
+          rows={2}
           mb="md"
         />
         <Group justify="flex-end">
           <Button variant="default" onClick={closeCancelStay}>Back</Button>
           <Button
             color="orange"
-            disabled={!cancelReason.trim()}
+            disabled={!cancelReason.trim() || (Number(cancelRefundAmount) > 0 && !cancelRefundPaymentMethod)}
             loading={cancelStayMutation.isPending}
             onClick={() => cancelStayMutation.mutate({
               logId: activeLog.id,
               reason: cancelReason,
               cancellation_fee: cancelFee,
+              refund_amount: cancelRefundAmount,
+              refund_payment_method: cancelRefundPaymentMethod ? Number(cancelRefundPaymentMethod) : null,
+              refund_note: cancelRefundNote,
             })}
           >
             Confirm Cancellation

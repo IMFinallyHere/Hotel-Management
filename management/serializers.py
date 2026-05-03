@@ -3,7 +3,7 @@ from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, RoomsPriceChart, Reservation, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, ExpenseAttachment, RoomStatusLog, PaymentMethod, StayVehicle, FoodOrder, FoodOrderReceipt, CancellationLog
+from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, RoomsPriceChart, Reservation, ReservationPayment, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, ExpenseAttachment, RoomStatusLog, PaymentMethod, StayVehicle, FoodOrder, FoodOrderReceipt, CancellationLog, CancellationRefund
 
 
 class RoomTypeSerializer(serializers.ModelSerializer):
@@ -15,7 +15,7 @@ class RoomTypeSerializer(serializers.ModelSerializer):
 class RoomSerializer(serializers.ModelSerializer):
     class Meta:
         model = Rooms
-        fields = ['id', 'room_number', 'room_type', 'beds', 'price', 'is_ac', 'status', 'cancellation_fee', 'overtime_fee']
+        fields = ['id', 'room_number', 'room_type', 'beds', 'price', 'is_ac', 'status', 'cancellation_fee', 'overtime_fee', 'is_active']
 
 
 class RoomStatusLogSerializer(serializers.ModelSerializer):
@@ -170,6 +170,14 @@ class ReservationSerializer(serializers.ModelSerializer):
     room_number = serializers.CharField(source='room.room_number', read_only=True)
     customers = serializers.SerializerMethodField()
     advance_payment_method_name = serializers.CharField(source='advance_payment_method.name', read_only=True, default=None)
+    group_reservation_count = serializers.SerializerMethodField()
+    group_active_reservation_count = serializers.SerializerMethodField()
+    group_advance_total = serializers.SerializerMethodField()
+    group_refund_total = serializers.SerializerMethodField()
+    group_cancellation_fee_total = serializers.SerializerMethodField()
+    group_applied_total = serializers.SerializerMethodField()
+    group_advance_available = serializers.SerializerMethodField()
+    group_advance_payment_methods = serializers.SerializerMethodField()
 
     def get_reminders(self, obj):
         request = self.context.get('request')
@@ -182,9 +190,84 @@ class ReservationSerializer(serializers.ModelSerializer):
             for cg in obj.group.customers.select_related('customer').all()
         ]
 
+    def _summary(self, obj):
+        cache = getattr(self, '_reservation_group_summary_cache', None)
+        if cache is None:
+            cache = {}
+            self._reservation_group_summary_cache = cache
+        if obj.group_id in cache:
+            return cache[obj.group_id]
+
+        payments = obj.group.reservation_payments.select_related('payment_method').all()
+        advance_total = sum(p.amount for p in payments)
+        methods = []
+        seen = set()
+        for p in payments:
+            if p.payment_method_id in seen:
+                continue
+            seen.add(p.payment_method_id)
+            methods.append({'id': p.payment_method_id, 'name': p.payment_method.name})
+
+        cancellations = CancellationLog.objects.filter(cancellation_type='reservation', group_id=obj.group_id)
+        cancellation_fee_total = sum(c.cancellation_fee for c in cancellations)
+        refunds = CancellationRefund.objects.filter(cancellation__group_id=obj.group_id, cancellation__cancellation_type='reservation')
+        refund_total = sum(r.amount for r in refunds)
+        applied_total = sum(
+            r.applied_advance
+            for r in Reservation.objects.filter(group_id=obj.group_id, is_converted=True)
+        )
+        reservation_count = Reservation.objects.filter(group_id=obj.group_id).count()
+        active_reservation_count = Reservation.objects.filter(
+            group_id=obj.group_id, is_cancelled=False, is_converted=False
+        ).count()
+
+        summary = {
+            'advance_total': advance_total,
+            'refund_total': refund_total,
+            'cancellation_fee_total': cancellation_fee_total,
+            'applied_total': applied_total,
+            'advance_available': max(0, advance_total - refund_total - cancellation_fee_total - applied_total),
+            'methods': methods,
+            'reservation_count': reservation_count,
+            'active_reservation_count': active_reservation_count,
+        }
+        cache[obj.group_id] = summary
+        return summary
+
+    def get_group_reservation_count(self, obj):
+        return self._summary(obj)['reservation_count']
+
+    def get_group_active_reservation_count(self, obj):
+        return self._summary(obj)['active_reservation_count']
+
+    def get_group_advance_total(self, obj):
+        return self._summary(obj)['advance_total']
+
+    def get_group_refund_total(self, obj):
+        return self._summary(obj)['refund_total']
+
+    def get_group_cancellation_fee_total(self, obj):
+        return self._summary(obj)['cancellation_fee_total']
+
+    def get_group_applied_total(self, obj):
+        return self._summary(obj)['applied_total']
+
+    def get_group_advance_available(self, obj):
+        return self._summary(obj)['advance_available']
+
+    def get_group_advance_payment_methods(self, obj):
+        return self._summary(obj)['methods']
+
     class Meta:
         model = Reservation
-        fields = ['id', 'room', 'room_number', 'group', 'customers', 'check_in_date', 'check_out_date', 'price', 'advance_amount', 'advance_payment_method', 'advance_payment_method_name', 'created_on', 'reminders', 'is_cancelled']
+        fields = [
+            'id', 'room', 'room_number', 'group', 'customers', 'check_in_date', 'check_out_date', 'price',
+            'advance_amount', 'advance_payment_method', 'advance_payment_method_name',
+            'group_reservation_count', 'group_active_reservation_count',
+            'group_advance_total', 'group_refund_total', 'group_cancellation_fee_total',
+            'group_applied_total', 'group_advance_available', 'group_advance_payment_methods',
+            'created_on', 'reminders', 'is_cancelled', 'is_converted', 'applied_advance',
+        ]
 
     def validate(self, attrs):
         check_in = attrs.get('check_in_date')
@@ -420,10 +503,25 @@ class ShiftRoomSerializer(serializers.Serializer):
     price = serializers.DecimalField(max_digits=7, decimal_places=0, required=False)
 
 
+class CancellationRefundSerializer(serializers.ModelSerializer):
+    payment_method_name = serializers.CharField(source='payment_method.name', read_only=True)
+    processed_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CancellationRefund
+        fields = ['id', 'amount', 'payment_method', 'payment_method_name', 'processed_by_name', 'note', 'created_on']
+
+    def get_processed_by_name(self, obj):
+        if obj.processed_by:
+            return obj.processed_by.get_full_name() or obj.processed_by.username
+        return None
+
+
 class CancellationLogSerializer(serializers.ModelSerializer):
     cancelled_by_name = serializers.SerializerMethodField()
     guest_names = serializers.SerializerMethodField()
     check_in_date = serializers.SerializerMethodField()
+    refund = CancellationRefundSerializer(read_only=True)
 
     waived_amount = serializers.SerializerMethodField()
 
@@ -432,6 +530,7 @@ class CancellationLogSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'cancellation_type', 'room_number', 'guest_names', 'reason',
             'default_fee', 'cancellation_fee', 'waived_amount',
+            'refund',
             'cancelled_by_name', 'cancelled_on',
             'stay_log', 'reservation', 'check_in_date',
         ]

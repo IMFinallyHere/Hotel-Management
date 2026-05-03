@@ -228,8 +228,8 @@ export default function BulkBooking() {
 
   const bookableRooms = useMemo(() => {
     if (!bookingType) return [];
-    if (bookingType === 'reservation') return rooms.filter(r => !reservedForRange.has(r.id));
-    return rooms.filter(r => !occupiedIds.has(r.id) && r.status === 'available');
+    if (bookingType === 'reservation') return rooms.filter(r => r.is_active !== false && !reservedForRange.has(r.id));
+    return rooms.filter(r => r.is_active !== false && !occupiedIds.has(r.id) && r.status === 'available');
   }, [bookingType, rooms, occupiedIds, reservedForRange]);
 
   const debounceTimers = useRef({});
@@ -464,8 +464,10 @@ export default function BulkBooking() {
               check_in_date: dayjs(ciDate).format('YYYY-MM-DD'),
               check_out_date: dayjs(checkoutDate).format('YYYY-MM-DD'),
               price: config?.price ?? 0,
-              advance_amount: resAdvPaymentAmount || 0,
-              advance_payment_method: resAdvPaymentAmount > 0 && resAdvPaymentType ? Number(resAdvPaymentType) : null,
+              advance_amount: 0,
+              advance_payment_method: null,
+              group_advance_amount: resAdvPaymentAmount || 0,
+              group_advance_payment_method: resAdvPaymentAmount > 0 && resAdvPaymentType ? Number(resAdvPaymentType) : null,
             });
             roomResults.push({ roomId: room.id, status: 'success', message: 'Reserved' });
           } catch (e) {
@@ -1037,7 +1039,7 @@ export default function BulkBooking() {
           >
             Back to Rooms
           </Button>
-          <Title order={3}>Bulk Booking</Title>
+          <Title order={3}>New Booking</Title>
         </Group>
       </Group>
 

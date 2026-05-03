@@ -277,7 +277,12 @@ export default function ConvertCheckinModal({ opened, onClose, reservation, room
         await Promise.all(vehicleInputs.map(v => addStayVehicle(checkinData.log_id, v).catch(() => {})));
       }
 
-      await api.delete(`/v1/reservation/${reservation.id}/`);
+      const primaryMethodId = reservation.group_advance_payment_methods?.[0]?.id;
+      await api.post(`/v1/reservation/${reservation.id}/convert/`, {
+        log_id: checkinData.log_id,
+        apply_advance_amount: appliedGroupAdvance > 0 ? appliedGroupAdvance : 0,
+        apply_advance_payment_method: appliedGroupAdvance > 0 && primaryMethodId ? primaryMethodId : null,
+      });
       qc.invalidateQueries({ queryKey: QUERY_KEYS.activeLogs });
       qc.invalidateQueries({ queryKey: QUERY_KEYS.rooms });
       qc.invalidateQueries({ queryKey: QUERY_KEYS.roomReservations(room.id) });
@@ -304,6 +309,10 @@ export default function ConvertCheckinModal({ opened, onClose, reservation, room
       ? Math.round(ciRoomSubtotal * ciGstRate / (1 + ciGstRate))
       : 0;
   const ciEstimatedTotal = gstMode === 'added' ? ciRoomSubtotal + ciGstAmount : ciRoomSubtotal;
+  const groupAdvanceAvailable = Number(reservation?.group_advance_available ?? 0);
+  const canApplyGroupAdvance = Number(reservation?.group_active_reservation_count ?? 0) <= 1;
+  const appliedGroupAdvance = canApplyGroupAdvance ? groupAdvanceAvailable : 0;
+  const groupAdvanceMethods = (reservation?.group_advance_payment_methods || []).map(m => m.name).join(', ');
 
   return (
     <Modal opened={opened} onClose={handleClose} title="Convert Reservation to Check-In" size="90%">
@@ -551,24 +560,31 @@ export default function ConvertCheckinModal({ opened, onClose, reservation, room
                   <Text fw={700}>Estimated Total</Text>
                   <Text fw={700} size="lg">₹{Number(ciEstimatedTotal).toLocaleString()}</Text>
                 </Group>
-                {Number(reservation?.advance_amount) > 0 && (
+                {groupAdvanceAvailable > 0 && (
                   <>
                     <Group justify="space-between">
                       <Text size="sm" c="dimmed">
-                        Already Paid{reservation.advance_payment_method_name ? ` (${reservation.advance_payment_method_name})` : ''}
+                        Group Advance{groupAdvanceMethods ? ` (${groupAdvanceMethods})` : ''}
                       </Text>
-                      <Text size="sm" c="green">− ₹{Number(reservation.advance_amount).toLocaleString()}</Text>
+                      <Text size="sm" c={appliedGroupAdvance > 0 ? 'green' : 'dimmed'}>
+                        {appliedGroupAdvance > 0 ? '− ' : ''}₹{groupAdvanceAvailable.toLocaleString()}
+                      </Text>
                     </Group>
+                    {!canApplyGroupAdvance && (
+                      <Text size="xs" c="dimmed">
+                        This advance remains against the group booking and will not be applied to this room yet.
+                      </Text>
+                    )}
                     <Divider />
                     <Group justify="space-between">
                       <Text fw={700}>Balance Due</Text>
                       <Text fw={700} size="lg" c="teal">
-                        ₹{Math.max(0, ciEstimatedTotal - Number(reservation.advance_amount)).toLocaleString()}
+                        ₹{Math.max(0, ciEstimatedTotal - appliedGroupAdvance).toLocaleString()}
                       </Text>
                     </Group>
                   </>
                 )}
-                {Number(reservation?.advance_amount) === 0 && (
+                {groupAdvanceAvailable === 0 && (
                   <Group justify="space-between">
                     <Text fw={700}>Balance Due</Text>
                     <Text fw={700} size="lg" c="teal">₹{Number(ciEstimatedTotal).toLocaleString()}</Text>
