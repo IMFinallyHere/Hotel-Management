@@ -32,6 +32,24 @@ def record_money_event(
         food_order=food_order,
         note=note,
     )
+    if payment_method is not None and payment_method.name.strip().lower() == 'cash':
+        from .models import CashWithdrawal
+        _CASH_INFLOW  = {'payment_received', 'food_payment', 'reservation_advance', 'cancellation_fee'}
+        _CASH_OUTFLOW = {'expense_paid', 'refund_paid'}
+        if event_type in _CASH_INFLOW:
+            drawer_entry_type = 'credit'
+        elif event_type in _CASH_OUTFLOW:
+            drawer_entry_type = 'debit'
+        else:
+            drawer_entry_type = None
+        if drawer_entry_type:
+            CashWithdrawal.objects.create(
+                amount=amount,
+                reason=note or event_type.replace('_', ' ').title(),
+                entry_type=drawer_entry_type,
+                requested_by=recorded_by,
+                date=event_date,
+            )
 
 
 def assert_date_not_settled(date_val):
