@@ -68,13 +68,14 @@ class Command(BaseCommand):
                 continue
 
             if not dry:
-                CashWithdrawal.objects.create(
+                entry = CashWithdrawal.objects.create(
                     amount=ev.amount,
                     reason=reason,
                     entry_type=entry_type,
                     requested_by=ev.recorded_by,
                     date=ev.date,
                 )
+                CashWithdrawal.objects.filter(pk=entry.pk).update(created_on=ev.created_on)
             self.stdout.write(
                 f'{label}{entry_type.upper()}  {ev.date}  ₹{ev.amount}  [{ev.event_type}]  {reason}'
             )
