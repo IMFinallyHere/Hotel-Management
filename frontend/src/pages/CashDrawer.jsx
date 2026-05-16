@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import dayjs from 'dayjs';
 import { Table, Button, Group, Text, Modal, NumberInput, Textarea, Stack, Badge, SegmentedControl } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { useDisclosure } from '@mantine/hooks';
@@ -88,7 +89,7 @@ export default function CashDrawer() {
                       {isCredit ? 'CR' : 'DR'}
                     </Badge>
                   </Table.Td>
-                  <Table.Td>{w.date}</Table.Td>
+                  <Table.Td>{dayjs(w.created_on).format('DD MMM YYYY, hh:mm A')}</Table.Td>
                   <Table.Td fw={500} c={isCredit ? 'teal' : 'red'}>
                     {isCredit ? '+' : '−'}₹{Number(w.amount).toLocaleString()}
                   </Table.Td>

@@ -16,9 +16,7 @@ Events backfilled:
 from django.core.management.base import BaseCommand
 
 from management.models import CashWithdrawal, MoneyEvent
-
-INFLOW  = {'payment_received', 'food_payment', 'reservation_advance', 'cancellation_fee'}
-OUTFLOW = {'expense_paid', 'refund_paid'}
+from management.ledger import _drawer_reason, _CASH_INFLOW, _CASH_OUTFLOW
 
 
 class Command(BaseCommand):
@@ -39,31 +37,25 @@ class Command(BaseCommand):
         events = (
             MoneyEvent.objects
             .filter(
-                event_type__in=INFLOW | OUTFLOW,
+                event_type__in=_CASH_INFLOW | _CASH_OUTFLOW,
                 payment_method__name__iexact='cash',
             )
             .select_related(
                 'payment_method', 'recorded_by',
-                'stay_log__room', 'reservation__room', 'food_order__stay_log__room',
+                'stay_log__room',
+                'reservation__room',
+                'food_order__stay_log__room',
+                'cancellation',
             )
             .order_by('date', 'created_on')
         )
 
         for ev in events:
-            entry_type = 'credit' if ev.event_type in INFLOW else 'debit'
-            if ev.note:
-                reason = ev.note
-            elif ev.stay_log_id:
-                room_no = getattr(getattr(ev.stay_log, 'room', None), 'room_number', None)
-                reason = f'Room {room_no}' if room_no else ev.event_type.replace('_', ' ').title()
-            elif ev.reservation_id:
-                room_no = getattr(getattr(ev.reservation, 'room', None), 'room_number', None)
-                reason = f'Reservation – Room {room_no}' if room_no else 'Reservation Advance'
-            elif ev.food_order_id:
-                room_no = getattr(getattr(getattr(ev.food_order, 'stay_log', None), 'room', None), 'room_number', None)
-                reason = f'Food – Room {room_no}' if room_no else 'Food Payment'
-            else:
-                reason = ev.event_type.replace('_', ' ').title()
+            entry_type = 'credit' if ev.event_type in _CASH_INFLOW else 'debit'
+            reason = _drawer_reason(
+                ev.event_type, ev.note,
+                ev.stay_log, ev.reservation, ev.food_order, ev.cancellation,
+            )
 
             already_exists = CashWithdrawal.objects.filter(
                 amount=ev.amount,
