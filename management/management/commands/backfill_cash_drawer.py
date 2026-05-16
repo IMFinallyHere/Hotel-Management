@@ -42,13 +42,28 @@ class Command(BaseCommand):
                 event_type__in=INFLOW | OUTFLOW,
                 payment_method__name__iexact='cash',
             )
-            .select_related('payment_method', 'recorded_by')
+            .select_related(
+                'payment_method', 'recorded_by',
+                'stay_log__room', 'reservation__room', 'food_order__stay_log__room',
+            )
             .order_by('date', 'created_on')
         )
 
         for ev in events:
             entry_type = 'credit' if ev.event_type in INFLOW else 'debit'
-            reason = ev.note or ev.event_type.replace('_', ' ').title()
+            if ev.note:
+                reason = ev.note
+            elif ev.stay_log_id:
+                room_no = getattr(getattr(ev.stay_log, 'room', None), 'room_number', None)
+                reason = f'Room {room_no}' if room_no else ev.event_type.replace('_', ' ').title()
+            elif ev.reservation_id:
+                room_no = getattr(getattr(ev.reservation, 'room', None), 'room_number', None)
+                reason = f'Reservation – Room {room_no}' if room_no else 'Reservation Advance'
+            elif ev.food_order_id:
+                room_no = getattr(getattr(getattr(ev.food_order, 'stay_log', None), 'room', None), 'room_number', None)
+                reason = f'Food – Room {room_no}' if room_no else 'Food Payment'
+            else:
+                reason = ev.event_type.replace('_', ' ').title()
 
             already_exists = CashWithdrawal.objects.filter(
                 amount=ev.amount,

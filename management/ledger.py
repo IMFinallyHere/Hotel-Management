@@ -43,9 +43,22 @@ def record_money_event(
         else:
             drawer_entry_type = None
         if drawer_entry_type:
+            if note:
+                reason = note
+            elif stay_log_id := getattr(stay_log, 'pk', None):
+                room_no = getattr(getattr(stay_log, 'room', None), 'room_number', None)
+                reason = f'Room {room_no}' if room_no else event_type.replace('_', ' ').title()
+            elif reservation_id := getattr(reservation, 'pk', None):
+                room_no = getattr(getattr(reservation, 'room', None), 'room_number', None)
+                reason = f'Reservation – Room {room_no}' if room_no else 'Reservation Advance'
+            elif food_order_id := getattr(food_order, 'pk', None):
+                room_no = getattr(getattr(getattr(food_order, 'stay_log', None), 'room', None), 'room_number', None)
+                reason = f'Food – Room {room_no}' if room_no else 'Food Payment'
+            else:
+                reason = event_type.replace('_', ' ').title()
             CashWithdrawal.objects.create(
                 amount=amount,
-                reason=note or event_type.replace('_', ' ').title(),
+                reason=reason,
                 entry_type=drawer_entry_type,
                 requested_by=recorded_by,
                 date=event_date,
