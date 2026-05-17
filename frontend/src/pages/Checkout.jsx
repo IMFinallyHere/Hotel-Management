@@ -226,12 +226,13 @@ export default function Checkout() {
   };
 
   const computeOutstanding = (record, overtimeFee) => {
+    const fee = typeof overtimeFee === 'number' ? overtimeFee : 0;
     const nights = Math.max(1, dayjs().diff(dayjs(record.check_in), 'day'));
     const roomTotal = (Number(record.price) + record.extra_bed * Number(record.extra_per_bed_price)) * nights;
     const amenityTotal = (record.amenities || []).reduce((sum, a) =>
       sum + Number(a.price) * a.quantity * (a.charge_type === 'per_night' ? nights : 1), 0);
     const gstAmount = computeGst(record, nights, configMap['gst_percent']);
-    const billTotal = record.is_nc ? 0 : (record.gst_inclusive ? (roomTotal + amenityTotal + overtimeFee) : (roomTotal + amenityTotal + overtimeFee + gstAmount));
+    const billTotal = record.is_nc ? 0 : (record.gst_inclusive ? (roomTotal + amenityTotal + fee) : (roomTotal + amenityTotal + fee + gstAmount));
     const gstPct = Number(configMap['gst_percent'] ?? 0) / 100;
     const unpaidFood = (record.food_orders || []).filter(o => !o.is_paid)
       .reduce((s, o) => s + Number(o.amount) + (o.food_gst_inclusive ? 0 : Math.round(Number(o.amount) * gstPct)), 0);
@@ -695,8 +696,9 @@ export default function Checkout() {
             min={0}
             value={coOvertimeFee}
             onChange={(val) => {
-              setCoOvertimeFee(val);
-              setCoPaymentAmount(computeOutstanding(checkoutLog, val ?? 0));
+              const fee = typeof val === 'number' ? val : 0;
+              setCoOvertimeFee(fee);
+              setCoPaymentAmount(computeOutstanding(checkoutLog, fee));
             }}
             mb="md"
           />

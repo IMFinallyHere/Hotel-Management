@@ -9,7 +9,7 @@ import { useForm } from '@mantine/form';
 import { useDisclosure } from '@mantine/hooks';
 import { modals } from '@mantine/modals';
 import {
-  IconPackage, IconTrash, IconBan, IconUserPlus, IconInfoCircle, IconToolsKitchen2, IconEye, IconPaperclip,
+  IconPackage, IconTrash, IconBan, IconUserPlus, IconInfoCircle, IconToolsKitchen2, IconEye, IconPaperclip, IconCash,
 } from '@tabler/icons-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
@@ -64,6 +64,11 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
 
   const [graceOpened, { open: openGrace, close: closeGrace }] = useDisclosure(false);
   const [graceHours, setGraceHours] = useState('1');
+
+  const [paymentOpened, { open: openPayment, close: closePayment }] = useDisclosure(false);
+  const [newPaymentType, setNewPaymentType] = useState(null);
+  const [newPaymentAmount, setNewPaymentAmount] = useState(0);
+  const [newPaymentNote, setNewPaymentNote] = useState('');
 
   const { data: configs = [] } = useQuery({ queryKey: QUERY_KEYS.configurations, queryFn: fetchConfigurations });
   const configMap = parseConfigs(configs);
@@ -229,6 +234,28 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
       notifySuccess('Amenity removed.');
     },
     onError: (e) => notifyError(parseApiError(e, 'Failed to remove amenity.')),
+  });
+
+  const addPaymentMutation = useMutation({
+    mutationFn: ({ logId, payment_method, amount, note }) =>
+      api.post(`/v1/stay-logs/${logId}/payments/`, { payment_method, amount, note }),
+    onSuccess: () => {
+      qc.invalidateQueries(QUERY_KEYS.activeLogs);
+      setNewPaymentType(null);
+      setNewPaymentAmount(0);
+      setNewPaymentNote('');
+      notifySuccess('Payment recorded.');
+    },
+    onError: (e) => notifyError(parseApiError(e, 'Failed to record payment.')),
+  });
+
+  const removePaymentMutation = useMutation({
+    mutationFn: (id) => api.delete(`/v1/stay-logs/payments/${id}/`),
+    onSuccess: () => {
+      qc.invalidateQueries(QUERY_KEYS.activeLogs);
+      notifySuccess('Payment removed.');
+    },
+    onError: (e) => notifyError(parseApiError(e, 'Failed to remove payment.')),
   });
 
   const handleCheckin = async () => {
@@ -483,6 +510,8 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
     const foodGst = foodOrders.filter(o => !o.food_gst_inclusive).reduce((s, o) => s + Math.round(Number(o.amount) * gstPct), 0);
     const paidFood = foodOrders.filter(o => o.is_paid).reduce((s, o) => s + foodEffective(o), 0);
     const unpaidFood = totalFood - paidFood;
+    const totalPaid = (activeLog.payments || []).reduce((s, p) => s + Number(p.amount), 0);
+    const outstanding = totalCost + unpaidFood - totalPaid;
     const maxBeds = room.beds + activeLog.extra_bed;
     const currentGuestCount = currentGuests.length;
     const canAddGuest = currentGuestCount < maxBeds;
@@ -502,7 +531,6 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
         <Group align="flex-start" gap="xl" wrap="wrap">
           <Stack gap={0} style={{ minWidth: 300, flex: '0 1 400px' }}>
             {(() => {
-              const totalPaid = (activeLog.payments || []).reduce((s, p) => s + Number(p.amount), 0);
               const balanceDue = totalCost + unpaidFood - totalPaid;
               return (
                 <>
@@ -626,6 +654,9 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
           </Button>
           <Button size="xs" variant="light" leftSection={<IconPackage size={14} />} onClick={() => { setNewAmenityId(null); setNewAmenityQty(1); openAmenity(); }}>
             Amenities
+          </Button>
+          <Button size="xs" variant="light" leftSection={<IconCash size={14} />} onClick={() => { setNewPaymentType(null); setNewPaymentAmount(0); setNewPaymentNote(''); openPayment(); }}>
+            Payments
           </Button>
           <Button size="xs" variant="light" color="orange" leftSection={<IconToolsKitchen2 size={14} />}
             onClick={() => {
@@ -1038,6 +1069,93 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
               Grant
             </Button>
           </Group>
+        </Modal>
+
+        {/* Payments Modal */}
+        <Modal
+          opened={paymentOpened}
+          onClose={closePayment}
+          title={`Payments — Room ${room.room_number}`}
+          size="lg"
+        >
+          <Group mb="md" gap="xl">
+            <Text size="sm">Bill: <strong>₹{totalCost}</strong></Text>
+            {overtimeFee > 0 && (
+              <Text size="sm" c="yellow">Overtime: <strong>₹{overtimeFee}</strong></Text>
+            )}
+            {gstAmount > 0 && (
+              <Text size="sm" c="teal">GST: <strong>₹{gstAmount}</strong></Text>
+            )}
+            <Text size="sm">Paid: <strong style={{ color: 'green' }}>₹{totalPaid}</strong></Text>
+            <Text size="sm">Outstanding: <strong style={{ color: outstanding > 0 ? 'red' : 'inherit' }}>₹{outstanding}</strong></Text>
+          </Group>
+
+          {(activeLog.payments || []).length > 0 ? (
+            <Table striped withTableBorder mb="md">
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Type</Table.Th>
+                  <Table.Th>Amount</Table.Th>
+                  <Table.Th>By</Table.Th>
+                  <Table.Th>Note</Table.Th>
+                  <Table.Th>Action</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {(activeLog.payments || []).map(p => (
+                  <Table.Tr key={p.id}>
+                    <Table.Td><Badge size="sm" variant="light">{p.payment_method_name ?? p.payment_method}</Badge></Table.Td>
+                    <Table.Td>₹{p.amount}</Table.Td>
+                    <Table.Td>{p.processed_by_name ?? '—'}</Table.Td>
+                    <Table.Td>{p.note || '—'}</Table.Td>
+                    <Table.Td>
+                      <ActionIcon color="red" variant="light" onClick={() => removePaymentMutation.mutate(p.id)}>
+                        <IconTrash size={14} />
+                      </ActionIcon>
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          ) : (
+            <Text size="sm" c="dimmed" mb="md">No payments recorded yet.</Text>
+          )}
+
+          <Stack gap="sm">
+            <Group grow>
+              <Select
+                label="Payment Type"
+                placeholder="Select type"
+                data={paymentMethods.filter(p => p.is_active).map(p => ({ value: String(p.id), label: p.name }))}
+                value={newPaymentType}
+                onChange={setNewPaymentType}
+              />
+              <NumberInput
+                label="Amount (₹)"
+                value={newPaymentAmount}
+                onChange={setNewPaymentAmount}
+                min={1}
+              />
+            </Group>
+            <TextInput
+              label="Note (optional)"
+              value={newPaymentNote}
+              onChange={(e) => setNewPaymentNote(e.target.value)}
+              placeholder="e.g. advance payment"
+            />
+            <Group justify="flex-end">
+              <Button
+                onClick={() => {
+                  if (!newPaymentType || !newPaymentAmount) return;
+                  addPaymentMutation.mutate({ logId: activeLog.id, payment_method: Number(newPaymentType), amount: newPaymentAmount, note: newPaymentNote });
+                }}
+                loading={addPaymentMutation.isPending}
+                disabled={!newPaymentType || !newPaymentAmount}
+              >
+                Add Payment
+              </Button>
+            </Group>
+          </Stack>
         </Modal>
       </Stack>
     );

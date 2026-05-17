@@ -152,12 +152,13 @@ export default function RoomDetail() {
 
   const computeCheckoutOutstanding = (overtimeFee) => {
     if (!activeLog) return 0;
+    const fee = typeof overtimeFee === 'number' ? overtimeFee : 0;
     const nights = Math.max(1, dayjs().diff(dayjs(activeLog.check_in), 'day'));
     const roomTotal = (Number(activeLog.price) + activeLog.extra_bed * Number(activeLog.extra_per_bed_price)) * nights;
     const amenityTotal = (activeLog.amenities || []).reduce((sum, a) =>
       sum + Number(a.price) * a.quantity * (a.charge_type === 'per_night' ? nights : 1), 0);
     const gstAmount = computeGst(activeLog, nights, configMap['gst_percent']);
-    const billTotal = activeLog.is_nc ? 0 : (activeLog.gst_inclusive ? (roomTotal + amenityTotal + overtimeFee) : (roomTotal + amenityTotal + overtimeFee + gstAmount));
+    const billTotal = activeLog.is_nc ? 0 : (activeLog.gst_inclusive ? (roomTotal + amenityTotal + fee) : (roomTotal + amenityTotal + fee + gstAmount));
     const gstPct = Number(configMap['gst_percent'] ?? 0) / 100;
     const unpaidFood = (activeLog.food_orders || []).filter(o => !o.is_paid)
       .reduce((s, o) => s + Number(o.amount) + (o.food_gst_inclusive ? 0 : Math.round(Number(o.amount) * gstPct)), 0);
@@ -332,8 +333,9 @@ export default function RoomDetail() {
             min={0}
             value={coOvertimeFee}
             onChange={(val) => {
-              setCoOvertimeFee(val);
-              setCoPaymentAmount(computeCheckoutOutstanding(val ?? 0));
+              const fee = typeof val === 'number' ? val : 0;
+              setCoOvertimeFee(fee);
+              setCoPaymentAmount(computeCheckoutOutstanding(fee));
             }}
             mb="md"
           />
