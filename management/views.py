@@ -2139,6 +2139,7 @@ class ShiftRoom(APIView):
     def get_queryset():
         return RoomStayLogs.objects.all()
 
+    @transaction.atomic
     def post(self, request, pk):
         log = get_object_or_404(RoomStayLogs, pk=pk)
         if log.check_out is not None:
@@ -2156,47 +2157,31 @@ class ShiftRoom(APIView):
         if new_room.is_occupied():
             return Response({'error': f'Room {new_room.room_number} is already occupied.'}, status=400)
 
-        now = timezone.now()
+        old_room = log.room
 
-        # Check out the old room
-        log.check_out = now
+        # Update the existing stay log in place — no new log created
+        apply = serializer.validated_data.get('apply_extra_beds', True)
+        log.shifted_from = old_room
+        log.shift_reason = reason
+        log.room = new_room
+        log.price = serializer.validated_data.get('price', log.price)
+        log.extra_bed = serializer.validated_data.get('extra_bed', log.extra_bed) if apply else 0
+        log.extra_per_bed_price = serializer.validated_data.get('extra_per_bed_price', log.extra_per_bed_price) if apply else 0
         log.save()
 
-        # Determine extra bed carry-over
-        apply = serializer.validated_data.get('apply_extra_beds', True)
-        extra_bed = serializer.validated_data.get('extra_bed', log.extra_bed) if apply else 0
-        extra_per_bed_price = serializer.validated_data.get('extra_per_bed_price', log.extra_per_bed_price) if apply else 0
-
-        # Create a new stay log for the new room, preserving all stay details
-        new_log = RoomStayLogs(
-            room=new_room,
-            group=log.group,
-            price=serializer.validated_data.get('price', log.price),
-            extra_bed=extra_bed,
-            extra_per_bed_price=extra_per_bed_price,
-            is_nc=log.is_nc,
-            expected_checkout=log.expected_checkout,
-            overtime_rate=log.overtime_rate,
-            is_early_checkin=log.is_early_checkin,
-            gst_applied=log.gst_applied,
-            is_ac=log.is_ac,
-            shifted_from=log.room,
-            shift_reason=reason,
+        # Set old room back to available (shift ≠ checkout, no cleaning required)
+        old_status = old_room.status
+        old_room.status = 'available'
+        old_room.save(update_fields=['status'])
+        RoomStatusLog.objects.create(
+            room=old_room,
+            old_status=old_status,
+            new_status='available',
+            changed_by=request.user,
+            note=f'Auto-set after room shift to {new_room.room_number}',
         )
-        new_log.save()
-        # Preserve original check-in time
-        RoomStayLogs.objects.filter(pk=new_log.pk).update(check_in=log.check_in)
-        new_log.refresh_from_db()
 
-        # Transfer amenities to the new log
-        for sa in log.amenities.all():
-            StayLogAmenity.objects.create(
-                stay_log=new_log,
-                amenity=sa.amenity,
-                quantity=sa.quantity,
-            )
-
-        return Response({'new_log_id': new_log.id, 'new_room_id': new_room.id, 'new_room_number': new_room.room_number})
+        return Response({'new_log_id': log.id, 'new_room_id': new_room.id, 'new_room_number': new_room.room_number})
 
 
 class GSTReportView(APIView):
