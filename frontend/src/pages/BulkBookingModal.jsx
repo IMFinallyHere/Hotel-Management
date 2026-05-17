@@ -208,6 +208,9 @@ export default function BulkBooking() {
   const [submitting, setSubmitting] = useState(false);
   const [results, setResults] = useState(null); // array of { roomId, status, message }
   const [sharedGuest, setSharedGuest] = useState(() => createEmptyGuest(null));
+  const [sharedCountryCode, setSharedCountryCode] = useState(null);
+  const [sharedAddress, setSharedAddress] = useState('');
+  const [sharedPincode, setSharedPincode] = useState('');
 
   // booking type derived from check-in date: today = check-in now, future = reservation
   const bookingType = useMemo(() => {
@@ -233,6 +236,11 @@ export default function BulkBooking() {
   }, [bookingType, rooms, occupiedIds, reservedForRange]);
 
   const debounceTimers = useRef({});
+
+  // Initialize shared country code to India once codes load
+  useEffect(() => {
+    if (indiaId && !sharedCountryCode) setSharedCountryCode(indiaId);
+  }, [indiaId]);
 
   // Sync roomConfigs when selection changes
   useEffect(() => {
@@ -489,10 +497,12 @@ export default function BulkBooking() {
               const fd = new FormData();
               fd.append('name', row.name.trim());
               if (row.number?.trim()) fd.append('number', row.number.trim());
-              if (indiaId) fd.append('country_code', parseInt(indiaId));
+              if (sharedCountryCode) fd.append('country_code', parseInt(sharedCountryCode));
               if (row.gender) fd.append('gender', row.gender);
               if (row.date_of_birth) fd.append('date_of_birth', dayjs(row.date_of_birth).format('YYYY-MM-DD'));
               else if (row.age != null) fd.append('age', row.age);
+              if (sharedAddress?.trim()) fd.append('address', sharedAddress.trim());
+              if (sharedPincode?.trim()) fd.append('pincode', sharedPincode.trim());
               if (card1) fd.append('identity_card_1', card1);
               if (card2) fd.append('identity_card_2', card2);
               const { data } = await api.post('/v1/customers/', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
@@ -559,6 +569,9 @@ export default function BulkBooking() {
     setMaleCount(0); setFemaleCount(0); setChildCount(0);
     setVehicleInputs([]); setVehicleInputText('');
     setResAdvPaymentType('cash'); setResAdvPaymentAmount(0);
+    setSharedCountryCode(indiaId);
+    setSharedAddress('');
+    setSharedPincode('');
     setResults(null);
     navigate('/rooms');
   };
@@ -708,6 +721,34 @@ export default function BulkBooking() {
               </Grid.Col>
             </Grid>
           </Paper>
+
+          {/* Check-in: shared contact details */}
+          {bookingType === 'checkin' && (
+            <Paper withBorder p="md" radius="md">
+              <Text fw={600} size="sm" mb="sm">Contact Details</Text>
+              <Grid gutter="sm">
+                <Grid.Col span={{ base: 12, sm: 6 }}>
+                  <Select
+                    label="Country Code" searchable value={sharedCountryCode}
+                    data={codes.map(c => ({ value: String(c.id), label: `+${c.country_code} ${c.country_name}` }))}
+                    onChange={setSharedCountryCode}
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 6 }}>
+                  <TextInput label="Pincode" maxLength={6} value={sharedPincode}
+                    onChange={(e) => setSharedPincode(e.currentTarget.value)}
+                    onKeyDown={(e) => {
+                      if (!/^\d$/.test(e.key) && !['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.key))
+                        e.preventDefault();
+                    }}
+                  />
+                </Grid.Col>
+                <Grid.Col span={12}>
+                  <TextInput label="Address" value={sharedAddress} onChange={(e) => setSharedAddress(e.currentTarget.value)} />
+                </Grid.Col>
+              </Grid>
+            </Paper>
+          )}
 
           {/* Reservation: single contact guest */}
           {bookingType === 'reservation' && (
