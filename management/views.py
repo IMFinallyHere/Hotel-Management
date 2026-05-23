@@ -1,3 +1,4 @@
+import json
 import statistics
 from collections import defaultdict
 from datetime import timedelta, date as date_type
@@ -234,9 +235,42 @@ class Checkin(APIView):
     def get_queryset():
         return RoomStayLogs.objects.all()
 
+    @transaction.atomic
     def post(self, request):
+        guests_raw = request.data.get('guests', '[]')
+        try:
+            guests_data = json.loads(guests_raw) if isinstance(guests_raw, str) else (guests_raw or [])
+        except (ValueError, TypeError):
+            return Response({'error': 'Invalid guests format.'}, status=400)
+
+        guest_serializers = []
+        for idx, entry in enumerate(guests_data):
+            cid = entry.get('id')
+            if not cid:
+                return Response({'error': f'Guest {idx + 1}: missing id.'}, status=400)
+            customer = Customers.objects.filter(pk=cid).first()
+            if not customer:
+                return Response({'error': f'Guest {idx + 1}: customer not found.'}, status=400)
+
+            update_data = {k: v for k, v in entry.items() if k != 'id' and v not in (None, '')}
+            card1 = request.FILES.get(f'guest_{idx}_identity_card_1')
+            card2 = request.FILES.get(f'guest_{idx}_identity_card_2')
+            if card1:
+                update_data['identity_card_1'] = card1
+            if card2:
+                update_data['identity_card_2'] = card2
+
+            cs = CustomerSerializer(instance=customer, data=update_data, partial=True)
+            if not cs.is_valid():
+                label = entry.get('name') or f'Guest {idx + 1}'
+                return Response({'error': f'{label}: {cs.errors}'}, status=400)
+            guest_serializers.append(cs)
+
         serializer = CheckinSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+
+        for cs in guest_serializers:
+            cs.save()
         log = serializer.save(checked_in_by=request.user)
         return Response({'success_message': 'Checking Successful.', 'log_id': log.id})
 

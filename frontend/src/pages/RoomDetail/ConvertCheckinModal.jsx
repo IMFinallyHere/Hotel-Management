@@ -171,36 +171,29 @@ export default function ConvertCheckinModal({ opened, onClose, reservation, room
     setSubmitLoading(true);
     setSubmitError(null);
 
+    const guestUpdates = [];
+    const guestFiles = [];
     const newCustomerIds = [];
 
     for (let i = 0; i < guestRows.length; i++) {
       const row = guestRows[i];
       if (row.id) {
-        // Existing guest — patch to update info
-        try {
-          const card1 = row.identity_card_1 instanceof File ? await compressImage(row.identity_card_1) : null;
-          const card2 = row.identity_card_2 instanceof File ? await compressImage(row.identity_card_2) : null;
-          const fd = new FormData();
-          fd.append('name', row.name.trim());
-          if (row.number?.trim()) fd.append('number', row.number.trim());
-          if (sharedCountryCode) fd.append('country_code', parseInt(sharedCountryCode));
-          if (row.gender) fd.append('gender', row.gender);
-          if (row.date_of_birth) {
-            fd.append('date_of_birth', dayjs(row.date_of_birth).format('YYYY-MM-DD'));
-          } else if (row.age !== null && row.age !== undefined) {
-            fd.append('age', row.age);
-          }
-          if (sharedAddress?.trim()) fd.append('address', sharedAddress.trim());
-          if (sharedPincode?.trim()) fd.append('pincode', sharedPincode.trim());
-          if (card1) fd.append('identity_card_1', card1);
-          if (card2) fd.append('identity_card_2', card2);
-          await api.patch(`/v1/customers/${row.id}/`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
-        } catch (e) {
-          const label = i === 0 ? 'Main Guest' : `Guest ${i + 1}`;
-          setSubmitError(`${label}: ${parseApiError(e, 'Failed to save customer.')}`);
-          setSubmitLoading(false);
-          return;
+        // Existing guest — collect update data to bundle with check-in request
+        const card1 = row.identity_card_1 instanceof File ? await compressImage(row.identity_card_1) : null;
+        const card2 = row.identity_card_2 instanceof File ? await compressImage(row.identity_card_2) : null;
+        const entry = { id: row.id, name: row.name.trim() };
+        if (row.number?.trim()) entry.number = row.number.trim();
+        if (sharedCountryCode) entry.country_code = parseInt(sharedCountryCode);
+        if (row.gender) entry.gender = row.gender;
+        if (row.date_of_birth) {
+          entry.date_of_birth = dayjs(row.date_of_birth).format('YYYY-MM-DD');
+        } else if (row.age !== null && row.age !== undefined) {
+          entry.age = row.age;
         }
+        if (sharedAddress?.trim()) entry.address = sharedAddress.trim();
+        if (sharedPincode?.trim()) entry.pincode = sharedPincode.trim();
+        guestUpdates.push(entry);
+        guestFiles.push({ idx: guestUpdates.length - 1, card1, card2 });
       } else if (row.selectedCustomerId) {
         newCustomerIds.push(row.selectedCustomerId);
       } else {
@@ -247,19 +240,28 @@ export default function ConvertCheckinModal({ opened, onClose, reservation, room
     try {
       const [h, m] = defaultCheckoutTime.split(':').map(Number);
       const expectedCheckout = dayjs(checkoutDate).hour(h).minute(m).second(0).format('YYYY-MM-DDTHH:mm:ss');
-      const { data: checkinData } = await api.post('/v1/checkin/', {
-        room: room.id,
-        group: reservation.group,
-        price,
-        extra_bed: extraBed,
-        extra_per_bed_price: extraPerBedPrice,
-        expected_checkout: expectedCheckout,
-        gst_applied: gstMode !== 'none',
-        gst_inclusive: gstMode === 'inclusive',
-        is_ac: isAc,
-        male_count: maleCount,
-        female_count: femaleCount,
-        child_count: childCount,
+      const checkinFd = new FormData();
+      checkinFd.append('room', room.id);
+      checkinFd.append('group', reservation.group);
+      checkinFd.append('price', price);
+      checkinFd.append('extra_bed', extraBed);
+      checkinFd.append('extra_per_bed_price', extraPerBedPrice);
+      checkinFd.append('expected_checkout', expectedCheckout);
+      checkinFd.append('gst_applied', gstMode !== 'none');
+      checkinFd.append('gst_inclusive', gstMode === 'inclusive');
+      checkinFd.append('is_ac', isAc);
+      checkinFd.append('male_count', maleCount);
+      checkinFd.append('female_count', femaleCount);
+      checkinFd.append('child_count', childCount);
+      if (guestUpdates.length > 0) {
+        checkinFd.append('guests', JSON.stringify(guestUpdates));
+        for (const { idx, card1, card2 } of guestFiles) {
+          if (card1) checkinFd.append(`guest_${idx}_identity_card_1`, card1);
+          if (card2) checkinFd.append(`guest_${idx}_identity_card_2`, card2);
+        }
+      }
+      const { data: checkinData } = await api.post('/v1/checkin/', checkinFd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
       });
 
       if (advPaymentAmount > 0 && checkinData.log_id) {
