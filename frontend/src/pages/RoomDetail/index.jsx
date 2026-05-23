@@ -137,7 +137,7 @@ export default function RoomDetail() {
   const activeLog = activeLogs.find(l => l.room === room.id && l.check_out === null) ?? null;
   const today = new Date().toISOString().slice(0, 10);
   const nextReservation = reservations
-    .filter(r => r.check_in_date <= today && r.check_out_date >= today)
+    .filter(r => !r.is_cancelled && !r.is_converted && r.check_in_date <= today && r.check_out_date >= today)
     .sort((a, b) => a.check_in_date.localeCompare(b.check_in_date))[0] ?? null;
 
   const isReservedToday = !activeLog && !!nextReservation;

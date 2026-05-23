@@ -224,7 +224,7 @@ export default function BulkBooking() {
     const endStr = dayjs(checkoutDate).format('YYYY-MM-DD');
     return new Set(
       reservations
-        .filter(r => r.check_in_date < endStr && r.check_out_date > startStr)
+        .filter(r => !r.is_cancelled && !r.is_converted && r.check_in_date < endStr && r.check_out_date > startStr)
         .map(r => r.room)
     );
   }, [bookingType, ciDate, checkoutDate, reservations]);
