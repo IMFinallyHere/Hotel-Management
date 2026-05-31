@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Table, Button, Modal, Select, NumberInput, Group, Text } from '@mantine/core';
+import { Table, Button, Modal, Select, MultiSelect, NumberInput, Group, Text } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
 import { useForm } from '@mantine/form';
 import { useDisclosure } from '@mantine/hooks';
@@ -8,7 +8,7 @@ import { IconPlus } from '@tabler/icons-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import api from '../api/client';
-import { QUERY_KEYS, fetchPriceChart, fetchRooms } from '../api/queries';
+import { QUERY_KEYS, fetchPriceChart, fetchRooms, fetchRoomTypes } from '../api/queries';
 import { notifySuccess, notifyError } from '../api/notify';
 import { parseApiError } from '../api/errorUtils';
 import usePermissions from '../hooks/usePermissions';
@@ -21,18 +21,23 @@ export default function PriceChart() {
   const canDelete = permissions.delete_roomspricechart || permissions.is_superuser;
   const { data = [], isLoading } = useQuery({ queryKey: QUERY_KEYS.priceChart, queryFn: fetchPriceChart });
   const { data: rooms = [] } = useQuery({ queryKey: QUERY_KEYS.rooms, queryFn: fetchRooms });
+  const { data: roomTypes = [] } = useQuery({ queryKey: QUERY_KEYS.roomTypes, queryFn: fetchRoomTypes });
   const [opened, { open, close }] = useDisclosure(false);
   const [editing, setEditing] = useState(null);
   const [saving, setSaving] = useState(false);
   const [filterRoom, setFilterRoom] = useState(null);
   const [filterDate, setFilterDate] = useState(null);
+  const [quickType, setQuickType] = useState(null);
   const today = dayjs().format('YYYY-MM-DD');
 
   const form = useForm({
-    initialValues: { room: null, date: null, dates: [null, null], price: 0 },
+    initialValues: { room: null, rooms: [], date: null, dates: [null, null], price: 0 },
+    validate: {
+      rooms: (v, values) => !values.room && v.length === 0 ? 'Select at least one room' : null,
+    },
   });
 
-  const openAdd = () => { setEditing(null); form.reset(); open(); };
+  const openAdd = () => { setEditing(null); form.reset(); setQuickType(null); open(); };
   const openEdit = (record) => {
     setEditing(record);
     form.setValues({
@@ -45,9 +50,8 @@ export default function PriceChart() {
   };
 
   const handleSave = async (values) => {
-    if (!values.room) { form.setFieldError('room', 'Required'); return; }
-
     if (editing) {
+      if (!values.room) { form.setFieldError('room', 'Required'); return; }
       if (!values.date) { form.setFieldError('date', 'Required'); return; }
       setSaving(true);
       try {
@@ -65,6 +69,10 @@ export default function PriceChart() {
         setSaving(false);
       }
     } else {
+      if (values.rooms.length === 0) {
+        form.setFieldError('rooms', 'Select at least one room');
+        return;
+      }
       if (!values.dates?.[0] || !values.dates?.[1]) {
         form.setFieldError('dates', 'Select a date range');
         return;
@@ -72,16 +80,19 @@ export default function PriceChart() {
       setSaving(true);
       const start = dayjs(values.dates[0]);
       const end = dayjs(values.dates[1]);
-      const total = end.diff(start, 'day') + 1;
+      const days = end.diff(start, 'day') + 1;
+      const total = values.rooms.length * days;
       let added = 0;
       let skipped = 0;
-      for (let i = 0; i < total; i++) {
-        const date = start.add(i, 'day').format('YYYY-MM-DD');
-        try {
-          await api.post('/v1/price/chart/', { room: parseInt(values.room), date, price: values.price });
-          added++;
-        } catch {
-          skipped++;
+      for (const roomId of values.rooms) {
+        for (let i = 0; i < days; i++) {
+          const date = start.add(i, 'day').format('YYYY-MM-DD');
+          try {
+            await api.post('/v1/price/chart/', { room: parseInt(roomId), date, price: values.price });
+            added++;
+          } catch {
+            skipped++;
+          }
         }
       }
       qc.invalidateQueries({ queryKey: QUERY_KEYS.priceChart });
@@ -185,13 +196,50 @@ export default function PriceChart() {
 
       <Modal opened={opened} onClose={close} title={editing ? 'Edit Price Entry' : 'Add Price Entry'} size={{ base: '95%', sm: 'lg' }}>
         <form onSubmit={form.onSubmit(handleSave)}>
-          <Select
-            label="Room"
-            data={rooms.map(r => ({ value: String(r.id), label: r.room_number }))}
-            {...form.getInputProps('room')}
-            mb="sm"
-            required
-          />
+          {editing ? (
+            <Select
+              label="Room"
+              data={rooms.map(r => ({ value: String(r.id), label: r.room_number }))}
+              {...form.getInputProps('room')}
+              mb="sm"
+              required
+            />
+          ) : (
+            <>
+              <Group mb={4} align="flex-end" wrap="nowrap">
+                <Select
+                  label="Quick select by room type"
+                  placeholder="Pick a type…"
+                  data={roomTypes.map(t => ({ value: String(t.id), label: t.name }))}
+                  value={quickType}
+                  onChange={setQuickType}
+                  clearable
+                  style={{ flex: 1 }}
+                />
+                <Button
+                  variant="light"
+                  disabled={!quickType}
+                  onClick={() => {
+                    const ids = rooms
+                      .filter(r => String(r.room_type) === quickType)
+                      .map(r => String(r.id));
+                    form.setFieldValue('rooms', [...new Set([...form.values.rooms, ...ids])]);
+                  }}
+                >
+                  Add to selection
+                </Button>
+              </Group>
+              <MultiSelect
+                label="Rooms"
+                placeholder="Pick one or more rooms"
+                data={rooms.map(r => ({ value: String(r.id), label: r.room_number }))}
+                {...form.getInputProps('rooms')}
+                mb="sm"
+                required
+                searchable
+              />
+            </>
+          )}
           {editing ? (
             <DatePickerInput
               label="Date"
