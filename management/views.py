@@ -379,31 +379,27 @@ class ReservationListCreate(generics.ListCreateAPIView):
 
     def perform_create(self, serializer):
         reservation = serializer.save()
-        advance_amount = _parse_money(self.request.data.get('group_advance_amount', self.request.data.get('advance_amount')))
-        payment_method_id = self.request.data.get('group_advance_payment_method', self.request.data.get('advance_payment_method'))
-        if advance_amount > 0 and payment_method_id:
-            exists = ReservationPayment.objects.filter(
+        # Each room records only its own proportional share of the advance (the
+        # frontend splits the group advance by room price). This keeps the cash
+        # drawer / ledger totals correct (shares sum to the amount actually paid)
+        # and gives each room its own per-room advance entry.
+        share = _parse_money(reservation.advance_amount)
+        pm = reservation.advance_payment_method
+        if share > 0 and pm:
+            ReservationPayment.objects.create(
                 group=reservation.group,
-                amount=advance_amount,
-                payment_method_id=payment_method_id,
+                amount=share,
+                payment_method=pm,
+                processed_by=self.request.user,
                 note='Reservation advance',
-            ).exists()
-            if not exists:
-                ReservationPayment.objects.create(
-                    group=reservation.group,
-                    amount=advance_amount,
-                    payment_method_id=payment_method_id,
-                    processed_by=self.request.user,
-                    note='Reservation advance',
-                )
-                pm = PaymentMethod.objects.filter(pk=payment_method_id).first()
-                record_money_event(
-                    'reservation_advance', advance_amount,
-                    payment_method=pm,
-                    recorded_by=self.request.user,
-                    reservation=reservation,
-                    note='Reservation advance',
-                )
+            )
+            record_money_event(
+                'reservation_advance', share,
+                payment_method=pm,
+                recorded_by=self.request.user,
+                reservation=reservation,
+                note='Reservation advance',
+            )
 
     def get_queryset(self):
         qs = Reservation.objects.select_related('room', 'group').prefetch_related('group__customers__customer')

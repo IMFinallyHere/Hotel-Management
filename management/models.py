@@ -93,6 +93,9 @@ class RoomsPriceChart(models.Model):
 class RoomStayLogs(models.Model):
     room = models.ForeignKey(Rooms, models.CASCADE, 'logs')
     check_in = models.DateTimeField(auto_now_add=True)
+    # Records-only actual arrival time entered by staff. Never used by any
+    # billing/ledger/overtime logic — display only. All calculations use check_in.
+    actual_check_in = models.DateTimeField(null=True, blank=True)
     check_out = models.DateTimeField(null=True)
     price = models.DecimalField(max_digits=7, decimal_places=0, default=0)
     group = models.ForeignKey(Group, models.PROTECT, 'logs')

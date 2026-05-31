@@ -88,6 +88,11 @@ export default function ReservationsTab({ room, reservations, isOccupied, config
       <Table.Td>{res.check_in_date}</Table.Td>
       <Table.Td>{res.check_out_date}</Table.Td>
       <Table.Td>₹{res.price}</Table.Td>
+      <Table.Td>
+        {Number(res.advance_amount) > 0
+          ? `₹${Number(res.advance_amount).toLocaleString()}`
+          : <Text size="sm" c="dimmed">—</Text>}
+      </Table.Td>
       <Table.Td><CustomerList groupId={res.group} /></Table.Td>
       <Table.Td>
         {res.is_converted && <Badge color="blue" size="sm" mr="xs">Converted</Badge>}
@@ -144,13 +149,14 @@ export default function ReservationsTab({ room, reservations, isOccupied, config
             <Table.Th>Check-In</Table.Th>
             <Table.Th>Check-Out</Table.Th>
             <Table.Th>Price</Table.Th>
+            <Table.Th>Advance</Table.Th>
             <Table.Th>Guests</Table.Th>
             <Table.Th>Actions</Table.Th>
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
           {rows.length === 0 ? (
-            <Table.Tr><Table.Td colSpan={5} ta="center">No reservations for this room.</Table.Td></Table.Tr>
+            <Table.Tr><Table.Td colSpan={6} ta="center">No reservations for this room.</Table.Td></Table.Tr>
           ) : rows}
         </Table.Tbody>
       </Table>

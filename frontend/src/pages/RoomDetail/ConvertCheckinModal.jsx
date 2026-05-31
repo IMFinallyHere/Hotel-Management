@@ -4,7 +4,7 @@ import {
   NumberInput, Paper, Center, Loader, Select, ActionIcon,
   TextInput, SegmentedControl, Card, Badge,
 } from '@mantine/core';
-import { DatePickerInput } from '@mantine/dates';
+import { DatePickerInput, DateTimePicker } from '@mantine/dates';
 import { IconTrash, IconUserPlus } from '@tabler/icons-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
@@ -54,6 +54,7 @@ export default function ConvertCheckinModal({ opened, onClose, reservation, room
   const [extraBed, setExtraBed] = useState(0);
   const [extraPerBedPrice, setExtraPerBedPrice] = useState(0);
   const [checkoutDate, setCheckoutDate] = useState(null);
+  const [actualCheckin, setActualCheckin] = useState(null);
   const [gstMode, setGstMode] = useState('added');
   const [isAc, setIsAc] = useState(room.is_ac);
   const [sharedCountryCode, setSharedCountryCode] = useState(null);
@@ -67,6 +68,7 @@ export default function ConvertCheckinModal({ opened, onClose, reservation, room
   const [vehicleInputs, setVehicleInputs] = useState([]);
   const [vehicleInputText, setVehicleInputText] = useState('');
   const [checkoutDateError, setCheckoutDateError] = useState(null);
+  const [actualCheckinError, setActualCheckinError] = useState(null);
   const [submitError, setSubmitError] = useState(null);
   const [submitLoading, setSubmitLoading] = useState(false);
   const debounceTimers = useRef({});
@@ -149,6 +151,8 @@ export default function ConvertCheckinModal({ opened, onClose, reservation, room
     setGuestRows([]);
     setSubmitError(null);
     setCheckoutDateError(null);
+    setActualCheckin(null);
+    setActualCheckinError(null);
     onClose();
   };
 
@@ -156,6 +160,9 @@ export default function ConvertCheckinModal({ opened, onClose, reservation, room
     let hasErrors = false;
     if (!checkoutDate) { setCheckoutDateError('Select a checkout date.'); hasErrors = true; }
     else setCheckoutDateError(null);
+
+    if (!actualCheckin) { setActualCheckinError('Select the actual check-in time.'); hasErrors = true; }
+    else setActualCheckinError(null);
 
     const updatedRows = guestRows.map((row, idx) => {
       const errs = {};
@@ -247,6 +254,7 @@ export default function ConvertCheckinModal({ opened, onClose, reservation, room
       checkinFd.append('extra_bed', extraBed);
       checkinFd.append('extra_per_bed_price', extraPerBedPrice);
       checkinFd.append('expected_checkout', expectedCheckout);
+      checkinFd.append('actual_check_in', dayjs(actualCheckin).format('YYYY-MM-DDTHH:mm:ss'));
       checkinFd.append('gst_applied', gstMode !== 'none');
       checkinFd.append('gst_inclusive', gstMode === 'inclusive');
       checkinFd.append('is_ac', isAc);
@@ -312,8 +320,16 @@ export default function ConvertCheckinModal({ opened, onClose, reservation, room
       : 0;
   const ciEstimatedTotal = gstMode === 'added' ? ciRoomSubtotal + ciGstAmount : ciRoomSubtotal;
   const groupAdvanceAvailable = Number(reservation?.group_advance_available ?? 0);
-  const canApplyGroupAdvance = Number(reservation?.group_active_reservation_count ?? 0) <= 1;
-  const appliedGroupAdvance = canApplyGroupAdvance ? groupAdvanceAvailable : 0;
+  // Each room applies its own proportional share of the advance. The last/only
+  // active room sweeps the full remaining pool — this mops up rounding leftovers,
+  // shares freed by cancelled rooms, manual group top-ups, and legacy
+  // reservations created before the split (whose advance_amount is 0).
+  const isLastActive = Number(reservation?.group_active_reservation_count ?? 0) <= 1;
+  const roomShare = Number(reservation?.advance_amount ?? 0);
+  const appliedGroupAdvance = Math.min(
+    isLastActive ? groupAdvanceAvailable : roomShare,
+    groupAdvanceAvailable,
+  );
   const groupAdvanceMethods = (reservation?.group_advance_payment_methods || []).map(m => m.name).join(', ');
 
   return (
@@ -361,6 +377,19 @@ export default function ConvertCheckinModal({ opened, onClose, reservation, room
                       {dayjs(checkoutDate).format('DD MMM YYYY')} at {defaultCheckoutTime} ({ciNights} night{ciNights !== 1 ? 's' : ''})
                     </Text>
                   )}
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, sm: 6 }}>
+                  <DateTimePicker
+                    label="Actual Check-in"
+                    description="Real arrival time for records (last 24h)"
+                    placeholder="Select date & time"
+                    value={actualCheckin}
+                    onChange={(val) => { setActualCheckin(val); setActualCheckinError(null); }}
+                    minDate={dayjs().subtract(24, 'hour').toDate()}
+                    maxDate={new Date()}
+                    required
+                    error={actualCheckinError}
+                  />
                 </Grid.Col>
                 <Grid.Col span={12}>
                   <Text size="sm" fw={500} mb={6}>GST</Text>
@@ -566,15 +595,16 @@ export default function ConvertCheckinModal({ opened, onClose, reservation, room
                   <>
                     <Group justify="space-between">
                       <Text size="sm" c="dimmed">
-                        Group Advance{groupAdvanceMethods ? ` (${groupAdvanceMethods})` : ''}
+                        Advance Applied{groupAdvanceMethods ? ` (${groupAdvanceMethods})` : ''}
                       </Text>
                       <Text size="sm" c={appliedGroupAdvance > 0 ? 'green' : 'dimmed'}>
-                        {appliedGroupAdvance > 0 ? '− ' : ''}₹{groupAdvanceAvailable.toLocaleString()}
+                        {appliedGroupAdvance > 0 ? '− ' : ''}₹{appliedGroupAdvance.toLocaleString()}
                       </Text>
                     </Group>
-                    {!canApplyGroupAdvance && (
+                    {groupAdvanceAvailable - appliedGroupAdvance > 0 && (
                       <Text size="xs" c="dimmed">
-                        This advance remains against the group booking and will not be applied to this room yet.
+                        ₹{(groupAdvanceAvailable - appliedGroupAdvance).toLocaleString()} of the group advance
+                        remains against the other rooms and is not applied here.
                       </Text>
                     )}
                     <Divider />

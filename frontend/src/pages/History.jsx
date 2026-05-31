@@ -135,6 +135,7 @@ function StayDetailModal({ log, opened, onClose, configMap, roomMap, roomTypeMap
       <SimpleGrid cols={2} spacing="xl">
         <Stack gap={2}>
           <InfoRow label="Checked In By" value={log.checked_in_by_name ?? '—'} />
+          <InfoRow label="Actual Check-In" value={log.actual_check_in ? dayjs(log.actual_check_in).format('DD MMM YYYY, hh:mm A') : null} />
           <InfoRow label="Checked Out By" value={log.checked_out_by_name ?? '—'} />
           <InfoRow label="Expected Checkout" value={log.expected_checkout ? dayjs(log.expected_checkout).format('DD MMM YYYY, hh:mm A') : null} />
           <InfoRow label="Occupants" value={occupants} />

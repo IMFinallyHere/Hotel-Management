@@ -4,7 +4,7 @@ import {
   NumberInput, TextInput, Select, Modal, Alert, ActionIcon, Textarea, SegmentedControl,
   Grid, Paper, Divider, Switch, Table, Checkbox, Anchor, Tooltip, FileInput,
 } from '@mantine/core';
-import { DatePickerInput } from '@mantine/dates';
+import { DatePickerInput, DateTimePicker } from '@mantine/dates';
 import { useForm } from '@mantine/form';
 import { useDisclosure } from '@mantine/hooks';
 import { modals } from '@mantine/modals';
@@ -80,10 +80,12 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
   const [checkinExtraBed, setCheckinExtraBed] = useState(0);
   const [checkinExtraPerBedPrice, setCheckinExtraPerBedPrice] = useState(0);
   const [checkinCheckoutDate, setCheckinCheckoutDate] = useState(null);
+  const [checkinActualDatetime, setCheckinActualDatetime] = useState(null);
   const [checkinGstMode, setCheckinGstMode] = useState('added');
   const [checkinIsAc, setCheckinIsAc] = useState(room.is_ac);
   const [checkinError, setCheckinError] = useState(null);
   const [checkinDateError, setCheckinDateError] = useState(null);
+  const [checkinActualError, setCheckinActualError] = useState(null);
   const [sharedCountryCode, setSharedCountryCode] = useState(null);
   const [sharedAddress, setSharedAddress] = useState('');
   const [sharedPincode, setSharedPincode] = useState('');
@@ -126,6 +128,7 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
     setCheckinExtraBed(0);
     setCheckinExtraPerBedPrice(0);
     setCheckinCheckoutDate(null);
+    setCheckinActualDatetime(null);
     setCheckinGstMode('added');
     setCheckinIsAc(room.is_ac);
     setCheckinError(null);
@@ -263,6 +266,9 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
     if (!checkinCheckoutDate) { setCheckinDateError('Select a checkout date.'); hasErrors = true; }
     else setCheckinDateError(null);
 
+    if (!checkinActualDatetime) { setCheckinActualError('Select the actual check-in time.'); hasErrors = true; }
+    else setCheckinActualError(null);
+
     let guestsValid = true;
     const updatedRows = guestRows.map((row, idx) => {
       const errs = {};
@@ -331,6 +337,7 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
         extra_bed: checkinExtraBed,
         extra_per_bed_price: checkinExtraPerBedPrice,
         expected_checkout: expectedCheckout,
+        actual_check_in: dayjs(checkinActualDatetime).format('YYYY-MM-DDTHH:mm:ss'),
         gst_applied: checkinGstMode !== 'none',
         gst_inclusive: checkinGstMode === 'inclusive',
         is_ac: checkinIsAc,
@@ -535,6 +542,9 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
               return (
                 <>
                   <DescRow label="Check-In" value={dayjs(activeLog.check_in).format('DD MMM YYYY, hh:mm A')} />
+                  {activeLog.actual_check_in && (
+                    <DescRow label="Actual Check-In" value={dayjs(activeLog.actual_check_in).format('DD MMM YYYY, hh:mm A')} />
+                  )}
                   <DescRow label="Expected Checkout"
                     value={activeLog.expected_checkout
                       ? dayjs(activeLog.expected_checkout).format('DD MMM YYYY, hh:mm A') : '—'} />
@@ -1238,6 +1248,19 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
                   Departure: {dayjs(checkinCheckoutDate).format('DD MMM YYYY')} at {defaultCheckoutTime} ({ciNights} night{ciNights !== 1 ? 's' : ''})
                 </Text>
               )}
+            </Grid.Col>
+            <Grid.Col span={{ base: 12, sm: 6 }}>
+              <DateTimePicker
+                label="Actual Check-in"
+                description="Real arrival time for records (last 24h)"
+                placeholder="Select date & time"
+                value={checkinActualDatetime}
+                onChange={(val) => { setCheckinActualDatetime(val); setCheckinActualError(null); }}
+                minDate={dayjs().subtract(24, 'hour').toDate()}
+                maxDate={new Date()}
+                required
+                error={checkinActualError}
+              />
             </Grid.Col>
             <Grid.Col span={12}>
               <Text size="sm" fw={500} mb={6}>GST</Text>

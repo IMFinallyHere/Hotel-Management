@@ -65,9 +65,10 @@ class RoomsPriceChartSerializer(serializers.ModelSerializer):
 class CheckinSerializer(serializers.ModelSerializer):
     class Meta:
         model = RoomStayLogs
-        fields = ['room', 'price', 'group', 'extra_bed', 'extra_per_bed_price', 'expected_checkout', 'gst_applied', 'gst_inclusive', 'is_ac', 'male_count', 'female_count', 'child_count']
+        fields = ['room', 'price', 'group', 'extra_bed', 'extra_per_bed_price', 'expected_checkout', 'gst_applied', 'gst_inclusive', 'is_ac', 'male_count', 'female_count', 'child_count', 'actual_check_in']
         extra_kwargs = {
             'price': {'required': False, 'default': 0},
+            'actual_check_in': {'required': True},
             'expected_checkout': {'required': False},
             'gst_applied': {'required': False, 'default': False},
             'gst_inclusive': {'required': False, 'default': False},
@@ -76,6 +77,15 @@ class CheckinSerializer(serializers.ModelSerializer):
             'female_count': {'required': False, 'default': 0},
             'child_count': {'required': False, 'default': 0},
         }
+
+    @staticmethod
+    def validate_actual_check_in(value):
+        now = timezone.now()
+        if value > now:
+            raise ValidationError('Actual check-in time cannot be in the future.')
+        if value < now - datetime.timedelta(hours=24):
+            raise ValidationError('Actual check-in time cannot be more than 24 hours ago.')
+        return value
 
     @staticmethod
     def validate_room(value):
@@ -126,7 +136,7 @@ class StayLogSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = RoomStayLogs
-        fields = ['id', 'room', 'group', 'check_in', 'check_out', 'price', 'extra_bed', 'extra_per_bed_price', 'is_nc',
+        fields = ['id', 'room', 'group', 'check_in', 'actual_check_in', 'check_out', 'price', 'extra_bed', 'extra_per_bed_price', 'is_nc',
                   'expected_checkout', 'overtime_rate', 'overtime_fee_charged', 'overtime_fee_default',
                   'grace_until', 'is_early_checkin', 'gst_applied', 'gst_inclusive',
                   'shifted_from', 'shift_reason', 'is_ac', 'checked_in_by_name', 'checked_out_by_name',

@@ -360,16 +360,18 @@ export default function Reservations() {
                     <Table.Td>{nights}</Table.Td>
                     <Table.Td>₹{Number(r.price).toLocaleString()}</Table.Td>
                     <Table.Td>
-                      {Number(r.group_advance_total) > 0
+                      {Number(r.advance_amount) > 0 || Number(r.group_advance_total) > 0
                         ? (
                           <>
                             <Text size="sm">
-                              Group ₹{Number(r.group_advance_total).toLocaleString()}
+                              Room ₹{Number(r.advance_amount).toLocaleString()}
                               <Text span size="xs" c="dimmed">
                                 {' '}({(r.group_advance_payment_methods || []).map(m => m.name).join(', ') || '—'})
                               </Text>
                             </Text>
-                            <Text size="xs" c="dimmed">Available ₹{Number(r.group_advance_available ?? 0).toLocaleString()}</Text>
+                            <Text size="xs" c="dimmed">
+                              Group ₹{Number(r.group_advance_total).toLocaleString()} · Available ₹{Number(r.group_advance_available ?? 0).toLocaleString()}
+                            </Text>
                           </>
                         )
                         : <Text size="sm" c="dimmed">—</Text>

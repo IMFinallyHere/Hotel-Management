@@ -153,6 +153,7 @@ export default function InvoiceDocument({ log, roomNumber, roomTypeName, configM
   const acLabel  = log.is_ac === true ? ' (AC)' : log.is_ac === false ? ' (Non-AC)' : '';
   const roomLabel = `${roomNumber}${acLabel}${roomTypeName ? ` | ${roomTypeName}` : ''}`;
   const checkInStr  = dayjs(log.check_in).format('dddd, MMMM D, YYYY, hh:mm A');
+  const actualCheckInStr = log.actual_check_in ? dayjs(log.actual_check_in).format('dddd, MMMM D, YYYY, hh:mm A') : null;
   const checkOutStr = log.check_out ? dayjs(log.check_out).format('dddd, MMMM D, YYYY, hh:mm A') : '—';
   const invoiceDate = log.check_out ? dayjs(log.check_out).format('DD-MM-YYYY') : dayjs().format('DD-MM-YYYY');
   const invoiceNum  = String(log.id).padStart(7, '0');
@@ -285,6 +286,7 @@ export default function InvoiceDocument({ log, roomNumber, roomTypeName, configM
           <View style={s.bookingLeft}>
             <Text style={s.bookingLabel}>Booking Details</Text>
             <KV label="Check in"   value={checkInStr} />
+            {actualCheckInStr ? <KV label="Actual arrival" value={actualCheckInStr} /> : null}
             <KV label="Check-out"  value={checkOutStr} />
             <KV label="Guests"     value={guestCountStr} />
             <KV label="Room"       value={roomLabel} />

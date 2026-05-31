@@ -5,7 +5,7 @@ import {
   Divider, SegmentedControl, ActionIcon, Table, Loader,
   ThemeIcon, SimpleGrid, Card, Box, Title,
 } from '@mantine/core';
-import { DatePickerInput } from '@mantine/dates';
+import { DatePickerInput, DateTimePicker } from '@mantine/dates';
 import { IconCheck, IconTrash, IconUserPlus, IconUpload, IconX, IconArrowLeft } from '@tabler/icons-react';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
@@ -194,6 +194,8 @@ export default function BulkBooking() {
   const [selectedRoomIds, setSelectedRoomIds] = useState(new Set());
   const [ciDate, setCiDate] = useState(null);
   const [checkoutDate, setCheckoutDate] = useState(null);
+  const [actualCheckin, setActualCheckin] = useState(null);
+  const [actualCheckinError, setActualCheckinError] = useState(null);
   const [gstMode, setGstMode] = useState('added');
   const [roomConfigs, setRoomConfigs] = useState({});
   const [advPaymentType, setAdvPaymentType] = useState(null);
@@ -416,6 +418,8 @@ export default function BulkBooking() {
 
     // check-in validation
     let valid = true;
+    if (!actualCheckin) { setActualCheckinError('Select the actual check-in time.'); valid = false; }
+    else setActualCheckinError(null);
     setRoomConfigs(prev => {
       const next = { ...prev };
       selectedRooms.forEach(room => {
@@ -462,8 +466,28 @@ export default function BulkBooking() {
         // 2. Create one group for all rooms
         const { data: gd } = await api.post('/v1/group/customers/', { customers: [contactId] });
         const groupId = gd.group_id;
-        // 3. Create one reservation per room
-        for (const room of selectedRooms) {
+        // 3. Split the advance across rooms proportionally by price (leftover
+        //    from rounding goes to the last room so shares sum exactly).
+        const totalAdvance = Math.round(Number(resAdvPaymentAmount) || 0);
+        const advMethod = totalAdvance > 0 && resAdvPaymentType ? Number(resAdvPaymentType) : null;
+        const roomPrices = selectedRooms.map(room => Number(roomConfigs[room.id]?.price) || 0);
+        const totalPrice = roomPrices.reduce((s, p) => s + p, 0);
+        const shares = (() => {
+          if (totalAdvance <= 0 || !advMethod) return selectedRooms.map(() => 0);
+          let remaining = totalAdvance;
+          return selectedRooms.map((room, i) => {
+            if (i === selectedRooms.length - 1) return remaining; // last room takes the remainder
+            const share = totalPrice > 0
+              ? Math.round(totalAdvance * roomPrices[i] / totalPrice)
+              : Math.floor(totalAdvance / selectedRooms.length); // no prices → split equally
+            remaining -= share;
+            return share;
+          });
+        })();
+
+        // 4. Create one reservation per room
+        for (let i = 0; i < selectedRooms.length; i++) {
+          const room = selectedRooms[i];
           const config = roomConfigs[room.id];
           try {
             await api.post('/v1/reservations/', {
@@ -472,10 +496,8 @@ export default function BulkBooking() {
               check_in_date: dayjs(ciDate).format('YYYY-MM-DD'),
               check_out_date: dayjs(checkoutDate).format('YYYY-MM-DD'),
               price: config?.price ?? 0,
-              advance_amount: 0,
-              advance_payment_method: null,
-              group_advance_amount: resAdvPaymentAmount || 0,
-              group_advance_payment_method: resAdvPaymentAmount > 0 && resAdvPaymentType ? Number(resAdvPaymentType) : null,
+              advance_amount: shares[i],
+              advance_payment_method: shares[i] > 0 ? advMethod : null,
             });
             roomResults.push({ roomId: room.id, status: 'success', message: 'Reserved' });
           } catch (e) {
@@ -485,6 +507,24 @@ export default function BulkBooking() {
       } else {
         // Check-in: per-room customers → group → checkin → advance payment
         const [h, m] = defaultCheckoutTime.split(':').map(Number);
+        // Split the advance across rooms proportionally by price (leftover from
+        // rounding goes to the last room so shares sum exactly to the advance).
+        const checkinRooms = selectedRooms.filter(r => roomConfigs[r.id]);
+        const ciTotalAdvance = Math.round(Number(advPaymentAmount) || 0);
+        const ciAdvActive = ciTotalAdvance > 0 && advPaymentType;
+        const ciPrices = checkinRooms.map(r => Number(roomConfigs[r.id]?.price) || 0);
+        const ciTotalPrice = ciPrices.reduce((s, p) => s + p, 0);
+        const ciShareMap = {};
+        let ciRemaining = ciTotalAdvance;
+        checkinRooms.forEach((r, i) => {
+          if (!ciAdvActive) { ciShareMap[r.id] = 0; return; }
+          if (i === checkinRooms.length - 1) { ciShareMap[r.id] = ciRemaining; return; }
+          const share = ciTotalPrice > 0
+            ? Math.round(ciTotalAdvance * ciPrices[i] / ciTotalPrice)
+            : Math.floor(ciTotalAdvance / checkinRooms.length);
+          ciShareMap[r.id] = share;
+          ciRemaining -= share;
+        });
         for (const room of selectedRooms) {
           const config = roomConfigs[room.id];
           if (!config) continue;
@@ -516,15 +556,17 @@ export default function BulkBooking() {
               price: config.price, extra_bed: config.extraBed,
               extra_per_bed_price: config.extraPerBedPrice,
               expected_checkout: expectedCheckout,
+              actual_check_in: dayjs(actualCheckin).format('YYYY-MM-DDTHH:mm:ss'),
               gst_applied: gstMode !== 'none', gst_inclusive: gstMode === 'inclusive',
               is_ac: config.isAc,
               male_count: maleCount,
               female_count: femaleCount,
               child_count: childCount,
             });
-            if (advPaymentAmount > 0 && ci.log_id) {
+            const roomAdv = ciShareMap[room.id] ?? 0;
+            if (roomAdv > 0 && ci.log_id) {
               await api.post(`/v1/stay-logs/${ci.log_id}/payments/`, {
-                payment_method: Number(advPaymentType), amount: advPaymentAmount,
+                payment_method: Number(advPaymentType), amount: roomAdv,
               }).catch(() => {});
             }
             if (vehicleInputs.length > 0 && ci.log_id) {
@@ -719,6 +761,21 @@ export default function BulkBooking() {
                   ]}
                 />
               </Grid.Col>
+              {bookingType === 'checkin' && (
+                <Grid.Col span={{ base: 12, sm: 6 }}>
+                  <DateTimePicker
+                    label="Actual Check-in"
+                    description="Real arrival time for records (last 24h) — applies to all rooms"
+                    placeholder="Select date & time"
+                    value={actualCheckin}
+                    onChange={(val) => { setActualCheckin(val); setActualCheckinError(null); }}
+                    minDate={dayjs().subtract(24, 'hour').toDate()}
+                    maxDate={new Date()}
+                    required
+                    error={actualCheckinError}
+                  />
+                </Grid.Col>
+              )}
             </Grid>
           </Paper>
 
@@ -953,7 +1010,7 @@ export default function BulkBooking() {
                     data={paymentMethods.filter(p => p.is_active).map(p => ({ value: String(p.id), label: p.name }))}
                     value={advPaymentType} onChange={setAdvPaymentType}
                   />
-                  <NumberInput size="sm" label="Amount per room (₹)" min={0}
+                  <NumberInput size="sm" label="Amount (₹)" min={0}
                     value={advPaymentAmount} onChange={setAdvPaymentAmount} placeholder="0 = no advance" />
                 </>
               )}
@@ -1048,7 +1105,7 @@ export default function BulkBooking() {
 
         {bookingType === 'checkin' && advPaymentAmount > 0 && (
           <Text size="sm" c="dimmed">
-            Advance payment of ₹{advPaymentAmount} ({paymentMethods.find(p => String(p.id) === advPaymentType)?.name ?? '—'}) will be recorded per room.
+            Advance payment of ₹{advPaymentAmount} ({paymentMethods.find(p => String(p.id) === advPaymentType)?.name ?? '—'}) will be split across rooms by price.
           </Text>
         )}
       </Stack>
