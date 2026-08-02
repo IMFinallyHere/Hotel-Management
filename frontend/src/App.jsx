@@ -9,6 +9,7 @@ import {
   IconTrendingUp, IconClock, IconBedFilled, IconTimeline,
   IconShieldLock, IconUserCog, IconLock, IconPackage,
   IconBan, IconCash, IconReceipt, IconScale, IconCoinRupee, IconBell, IconCalendarStats, IconTag,
+  IconMoneybag, IconReportMoney, IconTags,
 } from '@tabler/icons-react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { lazy, Suspense } from 'react';
@@ -39,13 +40,16 @@ const GroupManagement      = lazy(() => import('./pages/GroupManagement'));
 const Amenities            = lazy(() => import('./pages/Amenities'));
 const PaymentMethods       = lazy(() => import('./pages/PaymentMethods'));
 const ExpenseCategories    = lazy(() => import('./pages/ExpenseCategories'));
+const IncomeCategories     = lazy(() => import('./pages/IncomeCategories'));
 const PermissionOverview   = lazy(() => import('./pages/PermissionOverview'));
 const NCRequests           = lazy(() => import('./pages/NCRequests'));
 const CashDrawer           = lazy(() => import('./pages/CashDrawer'));
 const Expenses             = lazy(() => import('./pages/Expenses'));
+const Income                = lazy(() => import('./pages/Income'));
 const ProfitLoss           = lazy(() => import('./pages/finance/ProfitLoss'));
 const StaffSales           = lazy(() => import('./pages/finance/StaffSales'));
 const ExpenseReport        = lazy(() => import('./pages/finance/ExpenseReport'));
+const IncomeReport         = lazy(() => import('./pages/finance/IncomeReport'));
 const History              = lazy(() => import('./pages/History'));
 const GSTReport            = lazy(() => import('./pages/GSTReport'));
 const BulkBooking          = lazy(() => import('./pages/BulkBookingModal'));
@@ -104,12 +108,12 @@ function AppLayout() {
   };
 
   const roomsActive = path === '/rooms' || path.startsWith('/rooms/');
-  const operationsActive = roomsActive || path === '/checkout' || path === '/customers' || path === '/nc-requests' || path === '/cash-drawer' || path === '/expenses' || path === '/history' || path === '/bulk-booking' || path === '/reservations';
-  const configActive = ['/configurations', '/amenities', '/room-types', '/price-chart', '/country-codes', '/payment-methods', '/expense-categories'].includes(path);
+  const operationsActive = roomsActive || path === '/checkout' || path === '/customers' || path === '/nc-requests' || path === '/cash-drawer' || path === '/expenses' || path === '/income' || path === '/history' || path === '/bulk-booking' || path === '/reservations';
+  const configActive = ['/configurations', '/amenities', '/room-types', '/price-chart', '/country-codes', '/payment-methods', '/expense-categories', '/income-categories'].includes(path);
   const reportsActive = path.startsWith('/reports');
   const financeActive = path.startsWith('/finance');
   const adminActive = path.startsWith('/admin');
-  const hasAnyFinance = permissions.view_pl_report || permissions.view_staff_sales_report || permissions.view_expense_report || permissions.view_daily_settlement || permissions.is_superuser;
+  const hasAnyFinance = permissions.view_pl_report || permissions.view_staff_sales_report || permissions.view_expense_report || permissions.view_income_report || permissions.view_daily_settlement || permissions.is_superuser;
 
   const initials = firstName
     ? firstName.slice(0, 2).toUpperCase()
@@ -235,6 +239,15 @@ function AppLayout() {
             leftSection={<IconReceipt size={14} color="rgba(255,255,255,0.6)" />}
             onClick={() => { navigate('/expenses'); closeNav(); }}
             active={path === '/expenses'}
+          />
+          )}
+          {(permissions.view_income || permissions.is_superuser) && (
+          <NavLink
+            {...NL}
+            label={nl('Income')}
+            leftSection={<IconMoneybag size={14} color="rgba(255,255,255,0.6)" />}
+            onClick={() => { navigate('/income'); closeNav(); }}
+            active={path === '/income'}
           />
           )}
           {(permissions.view_roomncrequest || permissions.is_superuser) && (
@@ -428,6 +441,15 @@ function AppLayout() {
                 active={path === '/finance/expense-report'}
               />
             )}
+            {(permissions.view_income_report || permissions.is_superuser) && (
+              <NavLink
+                {...NL}
+                label={nl('Income Report')}
+                leftSection={<IconReportMoney size={14} color="rgba(255,255,255,0.6)" />}
+                onClick={() => { navigate('/finance/income-report'); closeNav(); }}
+                active={path === '/finance/income-report'}
+              />
+            )}
             {(permissions.view_daily_settlement || permissions.is_superuser) && (
               <NavLink
                 {...NL}
@@ -499,6 +521,15 @@ function AppLayout() {
             leftSection={<IconTag size={14} color="rgba(255,255,255,0.6)" />}
             onClick={() => { navigate('/expense-categories'); closeNav(); }}
             active={path === '/expense-categories'}
+          />
+          )}
+          {(permissions.view_incomecategory || permissions.is_superuser) && (
+          <NavLink
+            {...NL}
+            label={nl('Income Categories')}
+            leftSection={<IconTags size={14} color="rgba(255,255,255,0.6)" />}
+            onClick={() => { navigate('/income-categories'); closeNav(); }}
+            active={path === '/income-categories'}
           />
           )}
           {(permissions.view_configurations || permissions.is_superuser) && (
@@ -606,6 +637,7 @@ function AppLayout() {
           <Route path="/amenities" element={<Amenities />} />
           <Route path="/payment-methods" element={<PaymentMethods />} />
           <Route path="/expense-categories" element={<ExpenseCategories />} />
+          <Route path="/income-categories" element={<IncomeCategories />} />
           <Route path="/checkout" element={<Checkout />} />
           <Route path="/reports/today" element={<TodayOverview />} />
           <Route path="/reports/revenue" element={<RevenueReport />} />
@@ -621,9 +653,11 @@ function AppLayout() {
           <Route path="/nc-requests" element={<NCRequests />} />
           <Route path="/cash-drawer" element={<CashDrawer />} />
           <Route path="/expenses" element={<Expenses />} />
+          <Route path="/income" element={<Income />} />
           <Route path="/finance/pl" element={<ProfitLoss />} />
           <Route path="/finance/staff-sales" element={<StaffSales />} />
           <Route path="/finance/expense-report" element={<ExpenseReport />} />
+          <Route path="/finance/income-report" element={<IncomeReport />} />
           <Route path="/history" element={<History />} />
           <Route path="/reports/gst" element={<GSTReport />} />
           <Route path="/reports/cancellations" element={<CancellationReport />} />

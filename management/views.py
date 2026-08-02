@@ -11,8 +11,8 @@ from django.db.models import ProtectedError
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, Group, CustomerGroup, RoomsPriceChart, Reservation, ReservationPayment, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, ExpenseAttachment, ExpenseCategory, RoomStatusLog, PaymentMethod, StayVehicle, FoodOrder, FoodOrderReceipt, CancellationLog, CancellationRefund, MoneyEvent, DailySettlement, SettlementMethodBreakdown, StayNote
-from .serializers import RoomSerializer, RoomTypeSerializer, CountryCodeSerializer, CustomerSerializer, ConfigurationSerializer, CheckinSerializer, GroupCustomerSerializer, RoomsPriceChartSerializer, StayLogSerializer, StayLogUpdateSerializer, ReservationSerializer, ReservationReminderSerializer, AmenitySerializer, StayLogAmenitySerializer, ActiveStayLogSerializer, RoomNCRequestSerializer, PaymentSerializer, CashWithdrawalSerializer, ExpenseSerializer, ExpenseAttachmentSerializer, ExpenseCategorySerializer, ExtendStaySerializer, GraceSerializer, ShiftRoomSerializer, RoomStatusLogSerializer, PaymentMethodSerializer, StayVehicleSerializer, FoodOrderSerializer, FoodOrderReceiptSerializer, CancellationLogSerializer, StayNoteSerializer
+from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, Group, CustomerGroup, RoomsPriceChart, Reservation, ReservationPayment, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, ExpenseAttachment, ExpenseCategory, Income, IncomeAttachment, IncomeCategory, RoomStatusLog, PaymentMethod, StayVehicle, FoodOrder, FoodOrderReceipt, CancellationLog, CancellationRefund, MoneyEvent, DailySettlement, SettlementMethodBreakdown, StayNote
+from .serializers import RoomSerializer, RoomTypeSerializer, CountryCodeSerializer, CustomerSerializer, ConfigurationSerializer, CheckinSerializer, GroupCustomerSerializer, RoomsPriceChartSerializer, StayLogSerializer, StayLogUpdateSerializer, ReservationSerializer, ReservationReminderSerializer, AmenitySerializer, StayLogAmenitySerializer, ActiveStayLogSerializer, RoomNCRequestSerializer, PaymentSerializer, CashWithdrawalSerializer, ExpenseSerializer, ExpenseAttachmentSerializer, ExpenseCategorySerializer, IncomeSerializer, IncomeAttachmentSerializer, IncomeCategorySerializer, ExtendStaySerializer, GraceSerializer, ShiftRoomSerializer, RoomStatusLogSerializer, PaymentMethodSerializer, StayVehicleSerializer, FoodOrderSerializer, FoodOrderReceiptSerializer, CancellationLogSerializer, StayNoteSerializer
 from .ledger import record_money_event, assert_date_not_settled
 from .settlement import compute_settlement_snapshot, serialize_event
 from .permissions import report_permission, HasModelPermission
@@ -810,6 +810,30 @@ class ExpenseCategoryDetail(generics.RetrieveUpdateDestroyAPIView):
             return super().destroy(request, *args, **kwargs)
         except ProtectedError:
             return Response({'error': 'Cannot delete category — it is in use by existing expenses.'}, status=400)
+
+
+class IncomeCategoryListCreate(generics.ListCreateAPIView):
+    serializer_class = IncomeCategorySerializer
+    permission_classes = [DjangoModelPermissions]
+
+    def get_queryset(self):
+        qs = IncomeCategory.objects.order_by('name')
+        active_only = self.request.query_params.get('active')
+        if active_only == 'true':
+            qs = qs.filter(is_active=True)
+        return qs
+
+
+class IncomeCategoryDetail(generics.RetrieveUpdateDestroyAPIView):
+    queryset = IncomeCategory.objects.all()
+    serializer_class = IncomeCategorySerializer
+    permission_classes = [DjangoModelPermissions]
+
+    def destroy(self, request, *args, **kwargs):
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except ProtectedError:
+            return Response({'error': 'Cannot delete category — it is in use by existing income records.'}, status=400)
 
 
 class StayLogAmenityListCreate(generics.ListCreateAPIView):
@@ -1619,6 +1643,7 @@ class UserPermissionsView(APIView):
             'view_pl_report',
             'view_staff_sales_report',
             'view_expense_report',
+            'view_income_report',
             'view_reservationreminder',
             'view_daily_settlement',
             'manage_daily_settlement',
@@ -1635,10 +1660,10 @@ class UserPermissionsView(APIView):
         ]
         ops_settings_perms = [
             'view_rooms', 'view_roomstaylogs', 'view_customers',
-            'view_expense', 'view_roomncrequest', 'view_cashwithdrawal',
+            'view_expense', 'view_income', 'view_roomncrequest', 'view_cashwithdrawal',
             'view_reservation',
             'view_roomtype', 'view_roomspricechart', 'view_countrycodes',
-            'view_amenity', 'view_configurations', 'view_paymentmethod', 'view_expensecategory',
+            'view_amenity', 'view_configurations', 'view_paymentmethod', 'view_expensecategory', 'view_incomecategory',
         ]
         result = {p: request.user.has_perm(f'management.{p}') for p in report_perms}
         for p in admin_perms:
@@ -1649,6 +1674,7 @@ class UserPermissionsView(APIView):
             'add_rooms', 'change_rooms', 'delete_rooms',
             'add_customers', 'change_customers', 'delete_customers',
             'add_expense', 'change_expense', 'delete_expense',
+            'add_income', 'change_income', 'delete_income',
             'add_roomncrequest', 'change_roomncrequest', 'delete_roomncrequest',
             'add_cashwithdrawal', 'change_cashwithdrawal', 'delete_cashwithdrawal',
             'add_roomstaylogs', 'change_roomstaylogs', 'delete_roomstaylogs',
@@ -1660,6 +1686,7 @@ class UserPermissionsView(APIView):
             'add_configurations', 'change_configurations', 'delete_configurations',
             'add_paymentmethod', 'change_paymentmethod', 'delete_paymentmethod',
             'add_expensecategory', 'change_expensecategory', 'delete_expensecategory',
+            'add_incomecategory', 'change_incomecategory', 'delete_incomecategory',
         ]
         for p in crud_perms:
             result[p] = request.user.has_perm(f'management.{p}')
@@ -1867,6 +1894,76 @@ class ExpenseAttachmentDelete(APIView):
 
     def delete(self, request, pk):
         att = get_object_or_404(ExpenseAttachment, pk=pk)
+        att.file.delete(save=False)
+        att.delete()
+        return Response(status=204)
+
+
+# -----------  Income views  -----------
+
+class IncomeListCreate(generics.ListCreateAPIView):
+    serializer_class = IncomeSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        qs = Income.objects.select_related('recorded_by', 'category', 'payment_method').order_by('-date', '-created_on')
+        date = self.request.query_params.get('date')
+        start = self.request.query_params.get('start_date')
+        end = self.request.query_params.get('end_date')
+        if date:
+            qs = qs.filter(date=date)
+        else:
+            if start:
+                qs = qs.filter(date__gte=start)
+            if end:
+                qs = qs.filter(date__lte=end)
+        return qs
+
+    def perform_create(self, serializer):
+        income = serializer.save(recorded_by=self.request.user)
+        record_money_event(
+            'other_income', income.amount,
+            payment_method=income.payment_method,
+            recorded_by=self.request.user,
+            date=income.date,
+            note=income.description,
+        )
+
+
+class IncomeDetail(generics.RetrieveUpdateDestroyAPIView):
+    queryset = Income.objects.all()
+    serializer_class = IncomeSerializer
+    permission_classes = [IsAuthenticated]
+
+    def perform_destroy(self, instance):
+        try:
+            assert_date_not_settled(instance.date)
+        except ValueError as e:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError(str(e))
+        instance.delete()
+
+
+class IncomeAttachmentCreate(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        income = get_object_or_404(Income, pk=pk)
+        files = request.FILES.getlist('files')
+        if not files:
+            return Response({'error': 'No files provided.'}, status=400)
+        created = []
+        for f in files:
+            att = IncomeAttachment.objects.create(income=income, file=f)
+            created.append(IncomeAttachmentSerializer(att, context={'request': request}).data)
+        return Response(created, status=201)
+
+
+class IncomeAttachmentDelete(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, pk):
+        att = get_object_or_404(IncomeAttachment, pk=pk)
         att.file.delete(save=False)
         att.delete()
         return Response(status=204)
@@ -2118,6 +2215,52 @@ class ExpenseReportView(APIView):
                 'payment_type': pm_name,
                 'category': cat_name,
                 'recorded_by': e.recorded_by.get_full_name() or e.recorded_by.username if e.recorded_by else None,
+            })
+
+        by_day_list = sorted(
+            [{'date': d, 'total': sum(i['amount'] for i in items), 'items': items} for d, items in by_day.items()],
+            key=lambda x: x['date'],
+        )
+
+        return Response({
+            'total': float(total),
+            'by_payment_type': {k: float(v) for k, v in by_payment_type.items()},
+            'by_category': {k: float(v) for k, v in by_category.items()},
+            'by_day': by_day_list,
+        })
+
+
+class IncomeReportView(APIView):
+    permission_classes = [report_permission('view_income_report')]
+
+    def get(self, request):
+        today = timezone.localdate()
+        start = _parse_date(request.query_params.get('start_date'), today - timedelta(days=30))
+        end = _parse_date(request.query_params.get('end_date'), today)
+
+        incomes = Income.objects.filter(
+            date__gte=start,
+            date__lte=end,
+        ).select_related('recorded_by', 'payment_method', 'category').order_by('date')
+
+        total = Decimal(0)
+        by_payment_type = defaultdict(lambda: Decimal(0))
+        by_category = defaultdict(lambda: Decimal(0))
+        by_day = defaultdict(list)
+
+        for i in incomes:
+            total += i.amount
+            pm_name = i.payment_method.name if i.payment_method else 'Other'
+            cat_name = i.category.name if i.category else 'Uncategorized'
+            by_payment_type[pm_name] += i.amount
+            by_category[cat_name] += i.amount
+            by_day[i.date.isoformat()].append({
+                'id': i.id,
+                'description': i.description,
+                'amount': float(i.amount),
+                'payment_type': pm_name,
+                'category': cat_name,
+                'recorded_by': i.recorded_by.get_full_name() or i.recorded_by.username if i.recorded_by else None,
             })
 
         by_day_list = sorted(
@@ -2416,6 +2559,7 @@ class SettlementView(APIView):
                 'reservation_advances':     int(settlement.snap_reservation_advances),
                 'direct_cancellation_fees': int(settlement.snap_direct_cancellation_fees),
                 'cash_deposits':            int(settlement.snap_cash_deposits),
+                'other_income':             int(settlement.snap_other_income),
                 'withheld_cancellation_fees': int(snap['withheld_cancellation_fees']),
                 'expenses':                 int(settlement.snap_expenses),
                 'withdrawals':              int(settlement.snap_withdrawals),
@@ -2443,6 +2587,7 @@ class SettlementView(APIView):
                 'reservation_advances':     int(snap['reservation_advances']),
                 'direct_cancellation_fees': int(snap['direct_cancellation_fees']),
                 'cash_deposits':            int(snap['cash_deposits']),
+                'other_income':             int(snap['other_income']),
                 'withheld_cancellation_fees': int(snap['withheld_cancellation_fees']),
                 'expenses':                 int(snap['expenses']),
                 'withdrawals':              int(snap['withdrawals']),
@@ -2490,6 +2635,7 @@ class SettlementView(APIView):
             settlement.snap_reservation_advances     = snap['reservation_advances']
             settlement.snap_direct_cancellation_fees = snap['direct_cancellation_fees']
             settlement.snap_cash_deposits            = snap['cash_deposits']
+            settlement.snap_other_income             = snap['other_income']
             settlement.snap_total_inflow             = snap['total_inflow']
             settlement.snap_expenses                 = snap['expenses']
             settlement.snap_withdrawals              = snap['withdrawals']

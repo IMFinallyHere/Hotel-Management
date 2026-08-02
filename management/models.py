@@ -143,6 +143,15 @@ class ExpenseCategory(models.Model):
         return self.name
 
 
+class IncomeCategory(models.Model):
+    name = models.CharField(max_length=50, unique=True)
+    is_active = models.BooleanField(default=True)
+    created_on = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name
+
+
 class Reservation(models.Model):
     room = models.ForeignKey(Rooms, models.CASCADE, 'reservations')
     group = models.ForeignKey(Group, models.PROTECT, 'reservations')
@@ -212,6 +221,7 @@ class ReportPermissions(models.Model):
             ('view_staff_sales_report', 'Can view staff sales report'),
             ('view_cash_reconciliation', 'Can view cash reconciliation'),
             ('view_expense_report', 'Can view expense report'),
+            ('view_income_report', 'Can view income report'),
             ('view_cancellation_report', 'Can view cancellation report'),
             ('view_daily_settlement', 'Can view daily settlement'),
             ('manage_daily_settlement', 'Can settle/manage daily settlement'),
@@ -261,6 +271,22 @@ class Expense(models.Model):
 class ExpenseAttachment(models.Model):
     expense = models.ForeignKey(Expense, models.CASCADE, related_name='attachments')
     file = models.FileField(upload_to='expense_attachments/')
+    uploaded_on = models.DateTimeField(auto_now_add=True)
+
+
+class Income(models.Model):
+    description = models.CharField(max_length=200, blank=True, default='')
+    amount = models.DecimalField(max_digits=10, decimal_places=0)
+    category = models.ForeignKey(IncomeCategory, models.PROTECT, related_name='incomes')
+    payment_method = models.ForeignKey(PaymentMethod, models.PROTECT, related_name='incomes')
+    recorded_by = models.ForeignKey(User, models.SET_NULL, null=True, related_name='incomes')
+    date = models.DateField(default=timezone.localdate)
+    created_on = models.DateTimeField(auto_now_add=True)
+
+
+class IncomeAttachment(models.Model):
+    income = models.ForeignKey(Income, models.CASCADE, related_name='attachments')
+    file = models.FileField(upload_to='income_attachments/')
     uploaded_on = models.DateTimeField(auto_now_add=True)
 
 
@@ -328,6 +354,7 @@ class MoneyEvent(models.Model):
         ('reservation_advance', 'Reservation Advance'),
         ('advance_applied',     'Advance Applied at Check-in'),
         ('expense_paid',        'Expense Paid'),
+        ('other_income',        'Other Income'),
         ('cash_withdrawal',     'Cash Withdrawal'),
         ('cash_deposit',        'Cash Deposit'),
         ('refund_paid',         'Refund Paid'),
@@ -357,6 +384,7 @@ class DailySettlement(models.Model):
     snap_reservation_advances     = models.DecimalField(max_digits=12, decimal_places=0, default=0)
     snap_direct_cancellation_fees = models.DecimalField(max_digits=12, decimal_places=0, default=0)
     snap_cash_deposits            = models.DecimalField(max_digits=12, decimal_places=0, default=0)
+    snap_other_income             = models.DecimalField(max_digits=12, decimal_places=0, default=0)
     snap_total_inflow             = models.DecimalField(max_digits=12, decimal_places=0, default=0)
     snap_expenses                 = models.DecimalField(max_digits=12, decimal_places=0, default=0)
     snap_withdrawals              = models.DecimalField(max_digits=12, decimal_places=0, default=0)

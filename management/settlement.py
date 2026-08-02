@@ -37,6 +37,7 @@ def compute_settlement_snapshot(date_val):
         'direct_cancellation_fees': Decimal(0),
         'withheld_cancellation_fees': Decimal(0),
         'cash_deposits':            Decimal(0),
+        'other_income':             Decimal(0),
         'expenses':                 Decimal(0),
         'withdrawals':              Decimal(0),
         'refunds':                  Decimal(0),
@@ -83,6 +84,12 @@ def compute_settlement_snapshot(date_val):
             totals['cash_deposits'] += e.amount
             # cash deposits have no payment method bucket (physical cash)
 
+        elif e.event_type == 'other_income':
+            totals['other_income'] += e.amount
+            if pm_id:
+                by_method[pm_id]['inflow'] += e.amount
+                by_method[pm_id]['name'] = pm_name
+
         elif e.event_type == 'expense_paid':
             totals['expenses'] += e.amount
             if pm_id:
@@ -103,7 +110,7 @@ def compute_settlement_snapshot(date_val):
 
     total_inflow  = (totals['room_payments'] + totals['food_payments']
                      + totals['reservation_advances'] + totals['direct_cancellation_fees']
-                     + totals['cash_deposits'])
+                     + totals['cash_deposits'] + totals['other_income'])
     total_outflow = totals['expenses'] + totals['withdrawals'] + totals['refunds']
 
     return {

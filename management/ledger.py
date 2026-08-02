@@ -1,7 +1,7 @@
 from django.utils import timezone
 from .models import MoneyEvent
 
-_CASH_INFLOW  = {'payment_received', 'food_payment', 'reservation_advance', 'cancellation_fee'}
+_CASH_INFLOW  = {'payment_received', 'food_payment', 'reservation_advance', 'cancellation_fee', 'other_income'}
 _CASH_OUTFLOW = {'expense_paid', 'refund_paid'}
 
 

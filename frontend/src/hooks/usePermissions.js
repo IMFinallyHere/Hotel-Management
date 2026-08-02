@@ -16,6 +16,7 @@ const REPORT_KEYS = [
   'view_pl_report',
   'view_staff_sales_report',
   'view_expense_report',
+  'view_income_report',
   'view_cancellation_report',
   'view_reservationreminder',
   'view_daily_settlement',
@@ -29,13 +30,13 @@ const ADMIN_KEYS = [
 
 const OPS_KEYS = [
   'view_rooms', 'view_roomstaylogs', 'view_customers',
-  'view_expense', 'view_roomncrequest', 'view_cashwithdrawal',
+  'view_expense', 'view_income', 'view_roomncrequest', 'view_cashwithdrawal',
   'view_reservation',
 ];
 
 const SETTINGS_KEYS = [
   'view_roomtype', 'view_roomspricechart', 'view_countrycodes',
-  'view_amenity', 'view_configurations', 'view_paymentmethod', 'view_expensecategory',
+  'view_amenity', 'view_configurations', 'view_paymentmethod', 'view_expensecategory', 'view_incomecategory',
 ];
 
 export default function usePermissions() {

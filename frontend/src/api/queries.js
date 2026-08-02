@@ -16,6 +16,7 @@ export const QUERY_KEYS = {
   amenities: ['amenities'],
   paymentMethods: ['payment-methods'],
   expenseCategories: ['expense-categories'],
+  incomeCategories: ['income-categories'],
   stayLogAmenities: (logId) => ['stay-log-amenities', logId],
   users: ['users'],
   groups: ['groups'],
@@ -40,6 +41,7 @@ export const fetchConfigurations = () => api.get('/v1/configurations/').then(r =
 export const fetchAmenities = () => api.get('/v1/amenities/').then(r => r.data);
 export const fetchPaymentMethods = (activeOnly = false) => api.get('/v1/payment-methods/', { params: activeOnly ? { active: 'true' } : {} }).then(r => r.data);
 export const fetchExpenseCategories = (activeOnly = false) => api.get('/v1/expense-categories/', { params: activeOnly ? { active: 'true' } : {} }).then(r => r.data);
+export const fetchIncomeCategories = (activeOnly = false) => api.get('/v1/income-categories/', { params: activeOnly ? { active: 'true' } : {} }).then(r => r.data);
 export const fetchStayLogAmenities = (logId) => api.get(`/v1/stay-logs/${logId}/amenities/`).then(r => r.data);
 export const fetchUsers = () => api.get('/v1/users/').then(r => r.data);
 export const fetchGroups = () => api.get('/v1/groups/').then(r => r.data);
@@ -61,6 +63,7 @@ export const REPORT_QUERY_KEYS = {
   plReport: (params) => ['pl-report', params],
   staffSales: (params) => ['staff-sales', params],
   expenseReport: (params) => ['expense-report', params],
+  incomeReport: (params) => ['income-report', params],
   cancellationReport: (params) => ['cancellation-report', params],
 };
 
@@ -82,6 +85,7 @@ export const QUERY_KEYS_OPS = {
   ncRequests: ['nc-requests'],
   cashWithdrawals: ['cash-withdrawals'],
   expenses: (params) => ['expenses', params],
+  income: (params) => ['income', params],
   stayLogPayments: (logId) => ['stay-log-payments', logId],
   stayHistory: (params) => ['stay-history', params],
   gstReport: (params) => ['gst-report', params],
@@ -90,10 +94,12 @@ export const QUERY_KEYS_OPS = {
 export const fetchNcRequests = () => api.get('/v1/nc-requests/').then(r => r.data);
 export const fetchCashWithdrawals = () => api.get('/v1/cash-withdrawals/').then(r => r.data);
 export const fetchExpenses = (params) => api.get('/v1/expenses/', { params }).then(r => r.data);
+export const fetchIncome = (params) => api.get('/v1/income/', { params }).then(r => r.data);
 export const fetchStayLogPayments = (logId) => api.get(`/v1/stay-logs/${logId}/payments/`).then(r => r.data);
 export const fetchPLReport = (params) => api.get('/v1/finance/pl/', { params }).then(r => r.data);
 export const fetchStaffSales = (params) => api.get('/v1/finance/staff-sales/', { params }).then(r => r.data);
 export const fetchExpenseReport = (params) => api.get('/v1/finance/expenses/', { params }).then(r => r.data);
+export const fetchIncomeReport = (params) => api.get('/v1/finance/income/', { params }).then(r => r.data);
 export const fetchStayHistory = (params) => api.get('/v1/stay-logs/history/', { params }).then(r => r.data);
 export const fetchGSTReport = (params) => api.get('/v1/reports/gst/', { params }).then(r => r.data);
 export const fetchCancellationReport = (params) => api.get('/v1/reports/cancellations/', { params }).then(r => r.data);
