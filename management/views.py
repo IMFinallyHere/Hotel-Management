@@ -11,8 +11,8 @@ from django.db.models import ProtectedError
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, Group, CustomerGroup, RoomsPriceChart, Reservation, ReservationPayment, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, ExpenseAttachment, RoomStatusLog, PaymentMethod, StayVehicle, FoodOrder, FoodOrderReceipt, CancellationLog, CancellationRefund, MoneyEvent, DailySettlement, SettlementMethodBreakdown, StayNote
-from .serializers import RoomSerializer, RoomTypeSerializer, CountryCodeSerializer, CustomerSerializer, ConfigurationSerializer, CheckinSerializer, GroupCustomerSerializer, RoomsPriceChartSerializer, StayLogSerializer, StayLogUpdateSerializer, ReservationSerializer, ReservationReminderSerializer, AmenitySerializer, StayLogAmenitySerializer, ActiveStayLogSerializer, RoomNCRequestSerializer, PaymentSerializer, CashWithdrawalSerializer, ExpenseSerializer, ExpenseAttachmentSerializer, ExtendStaySerializer, GraceSerializer, ShiftRoomSerializer, RoomStatusLogSerializer, PaymentMethodSerializer, StayVehicleSerializer, FoodOrderSerializer, FoodOrderReceiptSerializer, CancellationLogSerializer, StayNoteSerializer
+from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, Group, CustomerGroup, RoomsPriceChart, Reservation, ReservationPayment, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, ExpenseAttachment, ExpenseCategory, RoomStatusLog, PaymentMethod, StayVehicle, FoodOrder, FoodOrderReceipt, CancellationLog, CancellationRefund, MoneyEvent, DailySettlement, SettlementMethodBreakdown, StayNote
+from .serializers import RoomSerializer, RoomTypeSerializer, CountryCodeSerializer, CustomerSerializer, ConfigurationSerializer, CheckinSerializer, GroupCustomerSerializer, RoomsPriceChartSerializer, StayLogSerializer, StayLogUpdateSerializer, ReservationSerializer, ReservationReminderSerializer, AmenitySerializer, StayLogAmenitySerializer, ActiveStayLogSerializer, RoomNCRequestSerializer, PaymentSerializer, CashWithdrawalSerializer, ExpenseSerializer, ExpenseAttachmentSerializer, ExpenseCategorySerializer, ExtendStaySerializer, GraceSerializer, ShiftRoomSerializer, RoomStatusLogSerializer, PaymentMethodSerializer, StayVehicleSerializer, FoodOrderSerializer, FoodOrderReceiptSerializer, CancellationLogSerializer, StayNoteSerializer
 from .ledger import record_money_event, assert_date_not_settled
 from .settlement import compute_settlement_snapshot, serialize_event
 from .permissions import report_permission, HasModelPermission
@@ -786,6 +786,30 @@ class PaymentMethodDetail(generics.RetrieveUpdateDestroyAPIView):
             return super().destroy(request, *args, **kwargs)
         except ProtectedError:
             return Response({'error': 'Cannot delete payment method — it is in use by existing payments or expenses.'}, status=400)
+
+
+class ExpenseCategoryListCreate(generics.ListCreateAPIView):
+    serializer_class = ExpenseCategorySerializer
+    permission_classes = [DjangoModelPermissions]
+
+    def get_queryset(self):
+        qs = ExpenseCategory.objects.order_by('name')
+        active_only = self.request.query_params.get('active')
+        if active_only == 'true':
+            qs = qs.filter(is_active=True)
+        return qs
+
+
+class ExpenseCategoryDetail(generics.RetrieveUpdateDestroyAPIView):
+    queryset = ExpenseCategory.objects.all()
+    serializer_class = ExpenseCategorySerializer
+    permission_classes = [DjangoModelPermissions]
+
+    def destroy(self, request, *args, **kwargs):
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except ProtectedError:
+            return Response({'error': 'Cannot delete category — it is in use by existing expenses.'}, status=400)
 
 
 class StayLogAmenityListCreate(generics.ListCreateAPIView):
@@ -1614,7 +1638,7 @@ class UserPermissionsView(APIView):
             'view_expense', 'view_roomncrequest', 'view_cashwithdrawal',
             'view_reservation',
             'view_roomtype', 'view_roomspricechart', 'view_countrycodes',
-            'view_amenity', 'view_configurations', 'view_paymentmethod',
+            'view_amenity', 'view_configurations', 'view_paymentmethod', 'view_expensecategory',
         ]
         result = {p: request.user.has_perm(f'management.{p}') for p in report_perms}
         for p in admin_perms:
@@ -1635,6 +1659,7 @@ class UserPermissionsView(APIView):
             'add_amenity', 'change_amenity', 'delete_amenity',
             'add_configurations', 'change_configurations', 'delete_configurations',
             'add_paymentmethod', 'change_paymentmethod', 'delete_paymentmethod',
+            'add_expensecategory', 'change_expensecategory', 'delete_expensecategory',
         ]
         for p in crud_perms:
             result[p] = request.user.has_perm(f'management.{p}')
@@ -1784,7 +1809,7 @@ class ExpenseListCreate(generics.ListCreateAPIView):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        qs = Expense.objects.select_related('recorded_by').order_by('-date', '-created_on')
+        qs = Expense.objects.select_related('recorded_by', 'category', 'payment_method').order_by('-date', '-created_on')
         date = self.request.query_params.get('date')
         start = self.request.query_params.get('start_date')
         end = self.request.query_params.get('end_date')

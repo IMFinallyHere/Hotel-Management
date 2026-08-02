@@ -8,7 +8,7 @@ import {
   IconBuildingSkyscraper, IconCalendarEvent, IconHeartHandshake,
   IconTrendingUp, IconClock, IconBedFilled, IconTimeline,
   IconShieldLock, IconUserCog, IconLock, IconPackage,
-  IconBan, IconCash, IconReceipt, IconScale, IconCoinRupee, IconBell, IconCalendarStats,
+  IconBan, IconCash, IconReceipt, IconScale, IconCoinRupee, IconBell, IconCalendarStats, IconTag,
 } from '@tabler/icons-react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { lazy, Suspense } from 'react';
@@ -38,6 +38,7 @@ const UserManagement       = lazy(() => import('./pages/UserManagement'));
 const GroupManagement      = lazy(() => import('./pages/GroupManagement'));
 const Amenities            = lazy(() => import('./pages/Amenities'));
 const PaymentMethods       = lazy(() => import('./pages/PaymentMethods'));
+const ExpenseCategories    = lazy(() => import('./pages/ExpenseCategories'));
 const PermissionOverview   = lazy(() => import('./pages/PermissionOverview'));
 const NCRequests           = lazy(() => import('./pages/NCRequests'));
 const CashDrawer           = lazy(() => import('./pages/CashDrawer'));
@@ -104,7 +105,7 @@ function AppLayout() {
 
   const roomsActive = path === '/rooms' || path.startsWith('/rooms/');
   const operationsActive = roomsActive || path === '/checkout' || path === '/customers' || path === '/nc-requests' || path === '/cash-drawer' || path === '/expenses' || path === '/history' || path === '/bulk-booking' || path === '/reservations';
-  const configActive = ['/configurations', '/amenities', '/room-types', '/price-chart', '/country-codes', '/payment-methods'].includes(path);
+  const configActive = ['/configurations', '/amenities', '/room-types', '/price-chart', '/country-codes', '/payment-methods', '/expense-categories'].includes(path);
   const reportsActive = path.startsWith('/reports');
   const financeActive = path.startsWith('/finance');
   const adminActive = path.startsWith('/admin');
@@ -491,6 +492,15 @@ function AppLayout() {
             active={path === '/payment-methods'}
           />
           )}
+          {(permissions.view_expensecategory || permissions.is_superuser) && (
+          <NavLink
+            {...NL}
+            label={nl('Expense Categories')}
+            leftSection={<IconTag size={14} color="rgba(255,255,255,0.6)" />}
+            onClick={() => { navigate('/expense-categories'); closeNav(); }}
+            active={path === '/expense-categories'}
+          />
+          )}
           {(permissions.view_configurations || permissions.is_superuser) && (
           <NavLink
             {...NL}
@@ -595,6 +605,7 @@ function AppLayout() {
           <Route path="/configurations" element={<Configurations />} />
           <Route path="/amenities" element={<Amenities />} />
           <Route path="/payment-methods" element={<PaymentMethods />} />
+          <Route path="/expense-categories" element={<ExpenseCategories />} />
           <Route path="/checkout" element={<Checkout />} />
           <Route path="/reports/today" element={<TodayOverview />} />
           <Route path="/reports/revenue" element={<RevenueReport />} />

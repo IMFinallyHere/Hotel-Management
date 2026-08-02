@@ -134,6 +134,15 @@ class PaymentMethod(models.Model):
         return self.name
 
 
+class ExpenseCategory(models.Model):
+    name = models.CharField(max_length=50, unique=True)
+    is_active = models.BooleanField(default=True)
+    created_on = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name
+
+
 class Reservation(models.Model):
     room = models.ForeignKey(Rooms, models.CASCADE, 'reservations')
     group = models.ForeignKey(Group, models.PROTECT, 'reservations')
@@ -240,8 +249,9 @@ class CashWithdrawal(models.Model):
 
 
 class Expense(models.Model):
-    description = models.CharField(max_length=200)
+    description = models.CharField(max_length=200, blank=True, default='')
     amount = models.DecimalField(max_digits=10, decimal_places=0)
+    category = models.ForeignKey(ExpenseCategory, models.PROTECT, related_name='expenses')
     payment_method = models.ForeignKey(PaymentMethod, models.PROTECT, related_name='expenses')
     recorded_by = models.ForeignKey(User, models.SET_NULL, null=True, related_name='expenses')
     date = models.DateField(default=timezone.localdate)

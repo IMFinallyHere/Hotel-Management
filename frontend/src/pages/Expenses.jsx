@@ -11,24 +11,28 @@ import { IconPlus, IconUpload, IconTrash, IconPaperclip, IconEye } from '@tabler
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import api from '../api/client';
-import { QUERY_KEYS, QUERY_KEYS_OPS, fetchExpenses, fetchPaymentMethods } from '../api/queries';
+import { QUERY_KEYS, QUERY_KEYS_OPS, fetchExpenses, fetchPaymentMethods, fetchExpenseCategories } from '../api/queries';
 import { notifySuccess, notifyError } from '../api/notify';
 import { parseApiError } from '../api/errorUtils';
 import { compressImage } from '../utils/imageUtils';
 import usePermissions from '../hooks/usePermissions';
 
+const CREATE_CATEGORY_VALUE = '__create__';
+
 export default function Expenses() {
   const qc = useQueryClient();
   const { permissions } = usePermissions();
-  const canAdd    = permissions.add_expense    || permissions.is_superuser;
+  const canAdd = permissions.add_expense || permissions.is_superuser;
   const canChange = permissions.change_expense || permissions.is_superuser;
   const canDelete = permissions.delete_expense || permissions.is_superuser;
+  const canCreateCategory = permissions.add_expensecategory || permissions.is_superuser;
 
   const [dateFilter, setDateFilter] = useState(new Date());
   const [opened, { open, close }] = useDisclosure(false);
   const [editing, setEditing] = useState(null);
   const [newFiles, setNewFiles] = useState([]);
   const [savingFiles, setSavingFiles] = useState(false);
+  const [categorySearch, setCategorySearch] = useState('');
 
   const dateStr = dayjs(dateFilter).format('YYYY-MM-DD');
   const queryParams = { date: dateStr };
@@ -41,30 +45,59 @@ export default function Expenses() {
   const pmOptions = paymentMethods.filter(p => p.is_active).map(p => ({ value: String(p.id), label: p.name }));
   const pmMap = Object.fromEntries(paymentMethods.map(p => [p.id, p.name]));
 
+  const { data: categories = [] } = useQuery({ queryKey: QUERY_KEYS.expenseCategories, queryFn: () => fetchExpenseCategories() });
+  const catMap = Object.fromEntries(categories.map(c => [c.id, c.name]));
+  let catOptions = categories.filter(c => c.is_active).map(c => ({ value: String(c.id), label: c.name }));
+  const searchMatchesExisting = categories.some(c => c.name.toLowerCase() === categorySearch.trim().toLowerCase());
+  if (canCreateCategory && categorySearch.trim() && !searchMatchesExisting) {
+    catOptions = [...catOptions, { value: CREATE_CATEGORY_VALUE, label: `+ Create "${categorySearch.trim()}"` }];
+  }
+
+  const createCategoryMutation = useMutation({
+    mutationFn: (name) => api.post('/v1/expense-categories/', { name, is_active: true }),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.expenseCategories });
+      form.setFieldValue('category', String(res.data.id));
+      notifySuccess('Category created.');
+    },
+    onError: (e) => notifyError(parseApiError(e, 'Failed to create category.')),
+  });
+
   const today = new Date();
 
   const form = useForm({
-    initialValues: { description: '', amount: 0, payment_method: null, date: today },
+    initialValues: { description: '', amount: 0, category: null, payment_method: null, date: today },
     validate: {
-      description: (v) => v.trim() ? null : 'Required',
       amount: (v) => v > 0 ? null : 'Amount must be greater than 0',
+      category: (v) => v ? null : 'Required',
       payment_method: (v) => v ? null : 'Required',
     },
   });
 
+  const handleCategoryChange = (value) => {
+    if (value === CREATE_CATEGORY_VALUE) {
+      createCategoryMutation.mutate(categorySearch.trim());
+      return;
+    }
+    form.setFieldValue('category', value);
+  };
+
   const openAdd = () => {
     setEditing(null);
     setNewFiles([]);
-    form.setValues({ description: '', amount: 0, payment_method: null, date: today });
+    setCategorySearch('');
+    form.setValues({ description: '', amount: 0, category: null, payment_method: null, date: today });
     open();
   };
 
   const openEdit = (record) => {
     setEditing(record);
     setNewFiles([]);
+    setCategorySearch('');
     form.setValues({
       description: record.description,
       amount: Number(record.amount),
+      category: record.category ? String(record.category) : null,
       payment_method: record.payment_method ? String(record.payment_method) : null,
       date: new Date(record.date),
     });
@@ -89,6 +122,7 @@ export default function Expenses() {
     mutationFn: async (values) => {
       const payload = {
         ...values,
+        category: Number(values.category),
         payment_method: Number(values.payment_method),
         date: dayjs(values.date).format('YYYY-MM-DD'),
       };
@@ -141,7 +175,12 @@ export default function Expenses() {
   const rows = expenses.map((exp) => (
     <Table.Tr key={exp.id}>
       <Table.Td>{exp.date}</Table.Td>
-      <Table.Td>{exp.description}</Table.Td>
+      <Table.Td>
+        <Badge variant="light" color="grape">
+          {catMap[exp.category] ?? exp.category_name ?? '—'}
+        </Badge>
+      </Table.Td>
+      <Table.Td>{exp.description || <Text size="xs" c="dimmed">—</Text>}</Table.Td>
       <Table.Td>₹{exp.amount}</Table.Td>
       <Table.Td>
         <Badge variant="light" color="blue">
@@ -199,6 +238,7 @@ export default function Expenses() {
           <Table.Thead>
             <Table.Tr>
               <Table.Th>Date</Table.Th>
+              <Table.Th>Category</Table.Th>
               <Table.Th>Description</Table.Th>
               <Table.Th>Amount</Table.Th>
               <Table.Th>Type</Table.Th>
@@ -209,9 +249,9 @@ export default function Expenses() {
           </Table.Thead>
           <Table.Tbody>
             {isLoading ? (
-              <Table.Tr><Table.Td colSpan={7} ta="center">Loading...</Table.Td></Table.Tr>
+              <Table.Tr><Table.Td colSpan={8} ta="center">Loading...</Table.Td></Table.Tr>
             ) : rows.length === 0 ? (
-              <Table.Tr><Table.Td colSpan={7} ta="center">No expenses for this date.</Table.Td></Table.Tr>
+              <Table.Tr><Table.Td colSpan={8} ta="center">No expenses for this date.</Table.Td></Table.Tr>
             ) : rows}
           </Table.Tbody>
         </Table>
@@ -220,9 +260,6 @@ export default function Expenses() {
       <Modal opened={opened} onClose={close} title={editing ? 'Edit Expense' : 'Add Expense'} size={{ base: '95%', sm: 'lg' }}>
         <form onSubmit={form.onSubmit(v => saveMutation.mutate(v))}>
           <Stack gap="sm">
-            <TextInput label="Description" {...form.getInputProps('description')} required />
-            <NumberInput label="Amount (₹)" min={1} {...form.getInputProps('amount')} required />
-            <Select label="Payment Method" data={pmOptions} {...form.getInputProps('payment_method')} required />
             <DatePickerInput
               label="Date"
               minDate={editing ? undefined : today}
@@ -230,6 +267,24 @@ export default function Expenses() {
               {...form.getInputProps('date')}
               required
             />
+            <Select
+              label="Category"
+              placeholder={canCreateCategory ? 'Search or create...' : 'Select category'}
+              data={catOptions}
+              searchable
+              searchValue={categorySearch}
+              onSearchChange={setCategorySearch}
+              value={form.values.category}
+              onChange={handleCategoryChange}
+              error={form.errors.category}
+              disabled={createCategoryMutation.isPending}
+              required
+            />
+            <Group grow align="flex-start">
+              <NumberInput label="Amount (₹)" min={1} {...form.getInputProps('amount')} required />
+              <Select label="Payment Method" data={pmOptions} {...form.getInputProps('payment_method')} required />
+            </Group>
+            <TextInput label="Description" {...form.getInputProps('description')} />
 
             {/* Existing attachments (edit mode) */}
             {editing?.attachments?.length > 0 && (

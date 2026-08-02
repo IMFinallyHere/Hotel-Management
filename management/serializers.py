@@ -3,7 +3,7 @@ from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, RoomsPriceChart, Reservation, ReservationPayment, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, ExpenseAttachment, RoomStatusLog, PaymentMethod, StayVehicle, FoodOrder, FoodOrderReceipt, CancellationLog, CancellationRefund, StayNote
+from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, RoomsPriceChart, Reservation, ReservationPayment, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, ExpenseAttachment, ExpenseCategory, RoomStatusLog, PaymentMethod, StayVehicle, FoodOrder, FoodOrderReceipt, CancellationLog, CancellationRefund, StayNote
 
 
 class RoomTypeSerializer(serializers.ModelSerializer):
@@ -53,6 +53,12 @@ class ConfigurationSerializer(serializers.ModelSerializer):
 class PaymentMethodSerializer(serializers.ModelSerializer):
     class Meta:
         model = PaymentMethod
+        fields = ['id', 'name', 'is_active', 'created_on']
+
+
+class ExpenseCategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ExpenseCategory
         fields = ['id', 'name', 'is_active', 'created_on']
 
 
@@ -510,11 +516,12 @@ class ExpenseAttachmentSerializer(serializers.ModelSerializer):
 class ExpenseSerializer(serializers.ModelSerializer):
     recorded_by_name = serializers.SerializerMethodField()
     payment_method_name = serializers.CharField(source='payment_method.name', read_only=True)
+    category_name = serializers.CharField(source='category.name', read_only=True)
     attachments = ExpenseAttachmentSerializer(many=True, read_only=True)
 
     class Meta:
         model = Expense
-        fields = ['id', 'description', 'amount', 'payment_method', 'payment_method_name', 'recorded_by', 'recorded_by_name', 'date', 'created_on', 'attachments']
+        fields = ['id', 'description', 'amount', 'category', 'category_name', 'payment_method', 'payment_method_name', 'recorded_by', 'recorded_by_name', 'date', 'created_on', 'attachments']
         read_only_fields = ['recorded_by']
 
     def get_recorded_by_name(self, obj):
