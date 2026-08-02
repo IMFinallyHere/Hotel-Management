@@ -46,7 +46,7 @@ export default function GuestAnalytics() {
   const country = data?.country || [];
 
   const pieData = gender.map((g, i) => ({
-    name: g.gender.charAt(0).toUpperCase() + g.gender.slice(1),
+    name: g.gender ? g.gender.charAt(0).toUpperCase() + g.gender.slice(1) : 'Unknown',
     value: g.count,
     color: COLORS[i % COLORS.length],
   }));
