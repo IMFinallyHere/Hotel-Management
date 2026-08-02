@@ -1238,7 +1238,7 @@ class CLVReportView(APIView):
             })
 
         group_ids = list(group_revenue.keys())
-        cg_qs = CustomerGroup.objects.filter(group_id__in=group_ids).select_related('customer')
+        cg_qs = CustomerGroup.objects.filter(group_id__in=group_ids).select_related('customer', 'customer__country_code')
 
         customer_data = defaultdict(lambda: {
             'total_revenue': Decimal(0), 'groups': set(), 'dates': [],
@@ -1263,6 +1263,8 @@ class CLVReportView(APIView):
             customers.append({
                 'id': cid,
                 'name': c.name,
+                'phone': c.number,
+                'phone_dial_code': c.country_code.country_code if c.country_code_id else None,
                 'total_revenue': total_rev,
                 'visit_count': visits,
                 'avg_spend': round(total_rev / visits, 2) if visits else 0,

@@ -3,11 +3,16 @@ import { useQuery } from '@tanstack/react-query';
 import { REPORT_QUERY_KEYS, fetchCLVReport } from '../api/queries';
 import {
   Group, Text, Title, Table, Stack, SimpleGrid,
-  Loader, Center, Select, Paper, ThemeIcon, Badge, NumberInput,
+  Loader, Center, Select, Paper, ThemeIcon, Badge, NumberInput, Anchor,
 } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
 import { BarChart } from '@mantine/charts';
-import { IconHeartHandshake, IconUsers, IconCurrencyRupee } from '@tabler/icons-react';
+import { IconHeartHandshake, IconUsers, IconCurrencyRupee, IconPhone } from '@tabler/icons-react';
+
+function telHref(phone, dialCode) {
+  if (!phone) return null;
+  return dialCode ? `tel:+${dialCode}${phone}` : `tel:${phone}`;
+}
 
 function fmtDate(d) {
   if (!d) return null;
@@ -153,7 +158,17 @@ export default function CustomerLifetimeValue() {
                 <Table.Tbody>
                   {customers.map(c => (
                     <Table.Tr key={c.id}>
-                      <Table.Td fw={500}>{c.name}</Table.Td>
+                      <Table.Td>
+                        <Text fw={500}>{c.name}</Text>
+                        {c.phone && (
+                          <Anchor href={telHref(c.phone, c.phone_dial_code)} size="xs" c="teal" underline="never">
+                            <Group gap={4} wrap="nowrap">
+                              <IconPhone size={12} />
+                              {c.phone}
+                            </Group>
+                          </Anchor>
+                        )}
+                      </Table.Td>
                       <Table.Td ta="right">{fmt(c.total_revenue)}</Table.Td>
                       <Table.Td ta="right">{c.visit_count}</Table.Td>
                       <Table.Td ta="right">{fmt(c.avg_spend)}</Table.Td>
