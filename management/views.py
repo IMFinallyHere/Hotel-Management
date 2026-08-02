@@ -2098,21 +2098,25 @@ class ExpenseReportView(APIView):
         expenses = Expense.objects.filter(
             date__gte=start,
             date__lte=end,
-        ).select_related('recorded_by', 'payment_method').order_by('date')
+        ).select_related('recorded_by', 'payment_method', 'category').order_by('date')
 
         total = Decimal(0)
         by_payment_type = defaultdict(lambda: Decimal(0))
+        by_category = defaultdict(lambda: Decimal(0))
         by_day = defaultdict(list)
 
         for e in expenses:
             total += e.amount
             pm_name = e.payment_method.name if e.payment_method else 'Other'
+            cat_name = e.category.name if e.category else 'Uncategorized'
             by_payment_type[pm_name] += e.amount
+            by_category[cat_name] += e.amount
             by_day[e.date.isoformat()].append({
                 'id': e.id,
                 'description': e.description,
                 'amount': float(e.amount),
                 'payment_type': pm_name,
+                'category': cat_name,
                 'recorded_by': e.recorded_by.get_full_name() or e.recorded_by.username if e.recorded_by else None,
             })
 
@@ -2124,6 +2128,7 @@ class ExpenseReportView(APIView):
         return Response({
             'total': float(total),
             'by_payment_type': {k: float(v) for k, v in by_payment_type.items()},
+            'by_category': {k: float(v) for k, v in by_category.items()},
             'by_day': by_day_list,
         })
 

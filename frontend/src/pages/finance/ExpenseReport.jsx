@@ -55,6 +55,32 @@ export default function ExpenseReport() {
             ))}
           </SimpleGrid>
 
+          {Object.keys(data.by_category).length > 0 && (
+            <Card withBorder p="md">
+              <Text fw={600} mb="sm">By Category</Text>
+              <Table striped withTableBorder>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Category</Table.Th>
+                    <Table.Th ta="right">Amount</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {Object.entries(data.by_category)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([category, amount]) => (
+                      <Table.Tr key={category}>
+                        <Table.Td>
+                          <Badge color="grape" variant="light">{category}</Badge>
+                        </Table.Td>
+                        <Table.Td ta="right">₹{amount.toLocaleString()}</Table.Td>
+                      </Table.Tr>
+                    ))}
+                </Table.Tbody>
+              </Table>
+            </Card>
+          )}
+
           {data.by_day.map(day => (
             <div key={day.date}>
               <Group mb="xs">
@@ -65,6 +91,7 @@ export default function ExpenseReport() {
                 <Table.Thead>
                   <Table.Tr>
                     <Table.Th>Description</Table.Th>
+                    <Table.Th>Category</Table.Th>
                     <Table.Th>Amount</Table.Th>
                     <Table.Th>Type</Table.Th>
                     <Table.Th>Recorded By</Table.Th>
@@ -73,7 +100,10 @@ export default function ExpenseReport() {
                 <Table.Tbody>
                   {day.items.map(item => (
                     <Table.Tr key={item.id}>
-                      <Table.Td>{item.description}</Table.Td>
+                      <Table.Td>{item.description || <Text size="xs" c="dimmed">—</Text>}</Table.Td>
+                      <Table.Td>
+                        <Badge color="grape" variant="light" size="sm">{item.category}</Badge>
+                      </Table.Td>
                       <Table.Td>₹{item.amount.toLocaleString()}</Table.Td>
                       <Table.Td>
                         <Badge color={TYPE_COLORS[item.payment_type]} variant="light" size="sm">
