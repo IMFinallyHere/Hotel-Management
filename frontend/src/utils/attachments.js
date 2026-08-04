@@ -23,8 +23,10 @@ function fetchBlobUrl(fileUrl) {
 
 export function openAttachment(fileUrl) {
   // Open the tab synchronously, inside the click handler, so browsers don't
-  // treat it as a popup once the (async) file fetch resolves later.
-  const tab = window.open('', '_blank', 'noopener,noreferrer');
+  // treat it as a popup once the (async) file fetch resolves later. Can't
+  // pass noopener/noreferrer here - those make window.open() return null,
+  // and we need the handle to navigate the tab once the blob is ready.
+  const tab = window.open('', '_blank');
 
   fetchBlobUrl(fileUrl)
     .then((blobUrl) => {
