@@ -26,11 +26,12 @@ from .views import (RoomTypeListCreate, RoomTypeDetail, RoomListCreate, RoomDeta
                     PLReportView, StaffSalesView, ExpenseReportView, IncomeReportView,
                     ExtendStay, GrantGrace, ShiftRoom, GSTReportView, StayLogHistory,
                     ReservationReminderListCreate, ReservationReminderDetail,
-                    SettlementView)
+                    SettlementView, ServeMediaView)
 from .auth_views import UserListCreate, UserDetail, GroupListCreate, GroupDetail, PermissionListView
 
 
 urlpatterns = [
+    path('media/<path:file_path>', ServeMediaView.as_view(), name='serve-media'),
     path('room/types/', RoomTypeListCreate.as_view(), name='room-type-list-create'),
     path('room/types/<int:pk>/', RoomTypeDetail.as_view(), name='room-type-detail'),
     path('rooms/', RoomListCreate.as_view(), name='room-list-create'),

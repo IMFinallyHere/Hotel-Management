@@ -11,6 +11,9 @@ from django.db.models import ProtectedError
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.core.files.storage import default_storage
+from django.core.exceptions import SuspiciousFileOperation
+from django.http import FileResponse, Http404
 from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, Group, CustomerGroup, RoomsPriceChart, Reservation, ReservationPayment, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, ExpenseAttachment, ExpenseCategory, Income, IncomeAttachment, IncomeCategory, RoomStatusLog, PaymentMethod, StayVehicle, FoodOrder, FoodOrderReceipt, CancellationLog, CancellationRefund, MoneyEvent, DailySettlement, SettlementMethodBreakdown, StayNote
 from .serializers import RoomSerializer, RoomTypeSerializer, CountryCodeSerializer, CustomerSerializer, ConfigurationSerializer, CheckinSerializer, GroupCustomerSerializer, RoomsPriceChartSerializer, StayLogSerializer, StayLogUpdateSerializer, ReservationSerializer, ReservationReminderSerializer, AmenitySerializer, StayLogAmenitySerializer, ActiveStayLogSerializer, RoomNCRequestSerializer, PaymentSerializer, CashWithdrawalSerializer, ExpenseSerializer, ExpenseAttachmentSerializer, ExpenseCategorySerializer, IncomeSerializer, IncomeAttachmentSerializer, IncomeCategorySerializer, ExtendStaySerializer, GraceSerializer, ShiftRoomSerializer, RoomStatusLogSerializer, PaymentMethodSerializer, StayVehicleSerializer, FoodOrderSerializer, FoodOrderReceiptSerializer, CancellationLogSerializer, StayNoteSerializer
 from .ledger import record_money_event, assert_date_not_settled
@@ -2663,3 +2666,16 @@ class SettlementView(APIView):
                 )
 
         return Response({'success_message': f'Settlement for {date_val} completed.'})
+
+
+class ServeMediaView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, file_path):
+        try:
+            exists = default_storage.exists(file_path)
+        except SuspiciousFileOperation:
+            raise Http404
+        if not exists:
+            raise Http404
+        return FileResponse(default_storage.open(file_path, 'rb'))
