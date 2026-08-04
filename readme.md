@@ -1,32 +1,130 @@
+# 🏨 Hotel Management System
 
-# Hotel Management
-After doing a lot of reserch I couldn't find a hotel management software for my hotel. Hence decided to make one myself. Though not sure if I would be able to ever complete and lauch it 😜.
+> *"I couldn't find a hotel management system I actually liked, so I built one."*
 
+A full-stack, from-scratch hotel management system — Django REST API on the back, React on the front — built to run the day-to-day of a real hotel: rooms, reservations, billing, cash, and everyone in between. Started as a "not sure I'll ever finish this 😜" side project. It got finished. It's got GST invoicing, guest analytics, and shift-based cash settlement now. Turns out we launched it.
 
-## Rooms
-- Number of beds in a room  = Number of customers a room can occupy. But more people can be accommodated by adding extra beds to a room. 
-- Room prices can be determined in 3 ways:
-    - room prices can be defined datewise in *RoomsPriceChart*.
-    - if room prices are not present in *RoomsPriceChart*, then if will be picked using default price *(defined while creating a room)*.
-    - At the time of giving room to a customers.
-- Rooms are always given to a group. More info can be found [here](#groups-and-customers).
+If you're new here: this is not a tutorial CRUD app. It's the real thing — clone it, seed it, and you'll have a working front desk in five minutes.
 
+---
 
-## Groups and Customers
-This group concept came into picture to solve one issue. 
+## ✨ What's inside
 
-Issue:
-| Group | No. of Customers | Room | Check-in | Check-out |
-| ----- | ---------------- | ---- | -------- | --------- |
-|1.|4|101|6:00|12:00|
-|2.|3|101|13:00|20:00|
+**Front desk & rooms**
+- 🛏️ Room dashboard, room types, and datewise price charts (with a default-price fallback)
+- 👥 Group-based check-ins — because two different sets of guests *can* share room 101 on the same day, and someone needs to know who stayed with whom
+- 📅 Reservations, booking pipeline, bulk booking, and reservation fulfillment
+- 🚪 Checkout flow, no-show/cancellation requests (NC Requests), and cancellation refunds
 
-Now if we see that the same room has been occupied by two different group of people on same date. So to find who stayed with whom on a particular date, I have introduced this group concept.
+**Money**
+- 💳 Payments, multiple payment methods, cash drawer & withdrawals
+- 🧾 GST-compliant invoicing (PDF), expense & income tracking with categories and attachments
+- 📊 Daily settlement with per-method breakdowns — close out a shift and know exactly what's in the till
+- 💰 Revenue, occupancy, and cancellation reports
 
-This is straigt forward, a group consist of one or more no. customer. Whenever one or more customers want to check-in into a room, always a new group is created and connected with that room on that date and time.
-## Configuration
-- Here we can store a key and its value. These keys will always be defined by the **developer**. All the validation based on keys will be written at code level.
+**Guests & extras**
+- 🧍 Customers, country codes, guest analytics, customer lifetime value
+- 🛎️ Amenities, extra-bed upsell, food orders, stay notes & vehicles
+- 📈 Room performance, seasonal trends, stay duration analytics
 
-Example:
-Here we are setting the price of extra bed.
-- key = extra_bed_price, value=500
+**Under the hood**
+- 🔐 JWT auth with granular, permission-key-based access control (`ReportPermissions`, per-feature checks)
+- ⚙️ A developer-defined key/value `Configurations` table for things like `extra_bed_price` — no migration needed to tweak business rules
+- 🌱 A `seed_data` management command so you're never staring at an empty database
+
+---
+
+## 🧱 Stack
+
+| Layer | Tech |
+|---|---|
+| Backend | Django 5 + Django REST Framework + SimpleJWT |
+| Frontend | React 19 + Vite + Mantine UI + TanStack Query |
+| Database | SQLite (dev-ready out of the box) |
+| Charts / PDF | Recharts, @react-pdf/renderer |
+
+---
+
+## 🚀 Getting started
+
+### 1. Backend (Django API)
+
+```bash
+# from the repo root
+python -m venv .venv
+.venv\Scripts\activate          # Windows
+# source .venv/bin/activate     # macOS/Linux
+
+pip install -r requirements.txt
+```
+
+Create a `.env` file in the repo root:
+
+```env
+SECRET_KEY=your-secret-key
+DEBUG=True
+ALLOWED_HOSTS=127.0.0.1,localhost
+```
+
+Then set up the database and (optionally) load some sample data so the app isn't a ghost town:
+
+```bash
+python manage.py migrate
+python manage.py seed_data
+python manage.py createsuperuser
+python manage.py runserver
+```
+
+The API is now running at `http://127.0.0.1:8000/`.
+
+### 2. Frontend (React app)
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Vite will print a local URL (typically `http://localhost:5173/`) — open it and log in with the superuser (or seeded) credentials.
+
+---
+
+## 🧠 Core concepts worth knowing
+
+### Rooms & pricing
+A room's bed count = how many guests it holds by default, but extra beds can bump that up. Prices resolve in this order:
+1. A datewise entry in **RoomsPriceChart**
+2. The room's own default price
+3. A manual override entered at the time the room is actually given to a customer
+
+### Groups & customers
+Two different sets of guests can occupy the same room on the same day (different check-in/checkout windows). To keep track of *who stayed with whom*, every check-in creates a **Group** — one or more customers, tied to a room for a specific stay. It's the join table that makes the history make sense.
+
+### Configurations
+A simple key/value store for business rules the *developer* defines and the *code* validates — e.g. `extra_bed_price = 500`. No schema change needed to adjust a number like that.
+
+---
+
+## 📁 Project layout
+
+```
+Hotel-Management/
+├── core/               # Django project settings, URLs, WSGI/ASGI
+├── management/         # The main Django app — models, views, serializers, permissions, ledger/settlement logic
+│   └── management/commands/seed_data.py
+├── frontend/           # React + Vite app (Mantine UI, React Query)
+│   └── src/pages/      # One file per feature — rooms, reports, finance, admin
+├── media/              # Uploaded attachments (expense/income receipts, etc.)
+├── manage.py
+└── requirements.txt
+```
+
+---
+
+## 🤝 Contributing
+
+Found a bug, or have an idea for a feature a real front desk needs? Open an issue or a PR — this project grew out of solving real problems for a real hotel, and it's still growing.
+
+---
+
+Built out of pure "why doesn't this already exist" energy. 🏨✨
