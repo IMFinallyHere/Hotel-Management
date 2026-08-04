@@ -6,6 +6,7 @@ import api from '../api/client';
 import { QUERY_KEYS, fetchGroupCustomers } from '../api/queries';
 import { notifySuccess, notifyError } from '../api/notify';
 import { parseApiError } from '../api/errorUtils';
+import { openAttachment } from '../utils/attachments';
 
 export function CustomerList({ groupId }) {
   const { data: customers = [], isLoading } = useQuery({
@@ -92,8 +93,8 @@ export function CustomerTable({ groupId, allowRemove = false, mainCustomerId = n
                 <Table.Td>{genderLabel[c.gender] ?? c.gender ?? '—'}</Table.Td>
                 <Table.Td>{[c.address, c.pincode].filter(Boolean).join(', ') || '—'}</Table.Td>
                 <Table.Td>{c.date_of_birth ?? '—'}</Table.Td>
-                <Table.Td>{c.identity_card_1 ? <a href={c.identity_card_1} target="_blank" rel="noopener noreferrer">View</a> : '—'}</Table.Td>
-                <Table.Td>{c.identity_card_2 ? <a href={c.identity_card_2} target="_blank" rel="noopener noreferrer">View</a> : '—'}</Table.Td>
+                <Table.Td>{c.identity_card_1 ? <a href="#" onClick={(e) => { e.preventDefault(); openAttachment(c.identity_card_1); }}>View</a> : '—'}</Table.Td>
+                <Table.Td>{c.identity_card_2 ? <a href="#" onClick={(e) => { e.preventDefault(); openAttachment(c.identity_card_2); }}>View</a> : '—'}</Table.Td>
                 {allowRemove && (
                   <Table.Td>
                     {!isMain && (

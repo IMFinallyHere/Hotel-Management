@@ -15,6 +15,7 @@ import { QUERY_KEYS, QUERY_KEYS_OPS, fetchExpenses, fetchPaymentMethods, fetchEx
 import { notifySuccess, notifyError } from '../api/notify';
 import { parseApiError } from '../api/errorUtils';
 import { compressImage } from '../utils/imageUtils';
+import { openAttachment } from '../utils/attachments';
 import usePermissions from '../hooks/usePermissions';
 
 const CREATE_CATEGORY_VALUE = '__create__';
@@ -193,11 +194,9 @@ export default function Expenses() {
           <Group gap={4} wrap="wrap">
             {exp.attachments.map((att, i) => (
               <Tooltip key={att.id} label={att.file.split('/').pop()}>
-                <Anchor href={att.file} target="_blank" rel="noopener noreferrer">
-                  <ActionIcon size="sm" variant="light" color="blue">
-                    <IconEye size={13} />
-                  </ActionIcon>
-                </Anchor>
+                <ActionIcon size="sm" variant="light" color="blue" onClick={() => openAttachment(att.file)}>
+                  <IconEye size={13} />
+                </ActionIcon>
               </Tooltip>
             ))}
             <Badge size="xs" variant="light" color="gray" leftSection={<IconPaperclip size={10} />}>
@@ -293,7 +292,7 @@ export default function Expenses() {
                 <Stack gap={4}>
                   {editing.attachments.map((att) => (
                     <Group key={att.id} gap="xs">
-                      <Anchor href={att.file} target="_blank" size="sm" rel="noopener noreferrer">
+                      <Anchor component="button" type="button" size="sm" onClick={() => openAttachment(att.file)}>
                         <Group gap={4}>
                           <IconEye size={13} />
                           {att.file.split('/').pop()}

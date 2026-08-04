@@ -10,6 +10,7 @@ import dayjs from 'dayjs';
 import api from '../api/client';
 import { QUERY_KEYS, fetchAllCustomers, fetchCountryCodes } from '../api/queries';
 import { compressImage } from '../utils/imageUtils';
+import { openAttachment } from '../utils/attachments';
 import { notifySuccess, notifyError } from '../api/notify';
 import { parseApiError } from '../api/errorUtils';
 import usePermissions from '../hooks/usePermissions';
@@ -151,10 +152,10 @@ export default function Customers() {
       <Table.Td>{customer.pincode || '—'}</Table.Td>
       <Table.Td>
         {customer.identity_card_1
-          ? <Button size="xs" variant="subtle" component="a" href={customer.identity_card_1} target="_blank">ID 1</Button>
+          ? <Button size="xs" variant="subtle" onClick={() => openAttachment(customer.identity_card_1)}>ID 1</Button>
           : '—'}
         {customer.identity_card_2
-          ? <Button size="xs" variant="subtle" component="a" href={customer.identity_card_2} target="_blank">ID 2</Button>
+          ? <Button size="xs" variant="subtle" onClick={() => openAttachment(customer.identity_card_2)}>ID 2</Button>
           : ''}
       </Table.Td>
       <Table.Td>{new Date(customer.first_visit).toLocaleDateString()}</Table.Td>

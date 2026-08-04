@@ -10,6 +10,7 @@ import { QUERY_KEYS, QUERY_KEYS_OPS, fetchActiveLogs, fetchRooms, fetchAmenities
 import { notifySuccess, notifyError } from '../api/notify';
 import { parseApiError } from '../api/errorUtils';
 import { parseConfigs, isLogOvertime, computeOvertimeFee, computeGst } from '../utils/configUtils';
+import { openAttachment } from '../utils/attachments';
 import InvoiceDocument from '../components/InvoiceDocument';
 
 // ── Customer chips (badges that open detail modal) ──────────────────────────
@@ -63,8 +64,8 @@ function GuestDetailTable({ groupId }) {
             <Table.Td>{genderLabel[c.gender] ?? c.gender ?? '—'}</Table.Td>
             <Table.Td>{[c.address, c.pincode].filter(Boolean).join(', ') || '—'}</Table.Td>
             <Table.Td>{c.date_of_birth ?? '—'}</Table.Td>
-            <Table.Td>{c.identity_card_1 ? <a href={c.identity_card_1} target="_blank" rel="noopener noreferrer">View</a> : '—'}</Table.Td>
-            <Table.Td>{c.identity_card_2 ? <a href={c.identity_card_2} target="_blank" rel="noopener noreferrer">View</a> : '—'}</Table.Td>
+            <Table.Td>{c.identity_card_1 ? <a href="#" onClick={(e) => { e.preventDefault(); openAttachment(c.identity_card_1); }}>View</a> : '—'}</Table.Td>
+            <Table.Td>{c.identity_card_2 ? <a href="#" onClick={(e) => { e.preventDefault(); openAttachment(c.identity_card_2); }}>View</a> : '—'}</Table.Td>
           </Table.Tr>
         ))}
       </Table.Tbody>

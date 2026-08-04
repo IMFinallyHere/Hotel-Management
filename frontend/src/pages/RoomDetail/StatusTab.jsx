@@ -22,6 +22,7 @@ import {
   addFoodOrder, updateFoodOrder, deleteFoodOrder, addFoodOrderReceipt, deleteFoodOrderReceipt,
 } from '../../api/queries';
 import { compressImage } from '../../utils/imageUtils';
+import { openAttachment } from '../../utils/attachments';
 import CustomerSelectWithAdd from '../../components/CustomerSelectWithAdd';
 import { CustomerTable } from '../../components/CustomerTable';
 import GuestForm, { createEmptyGuest } from '../../components/GuestForm';
@@ -739,11 +740,9 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
                         <Group gap={4}>
                           {o.receipts.map((r, ri) => (
                             <Tooltip key={r.id} label={r.file.split('/').pop()}>
-                              <Anchor href={r.file} target="_blank" rel="noopener noreferrer">
-                                <ActionIcon size="sm" variant="light" color="blue">
-                                  <IconEye size={12} />
-                                </ActionIcon>
-                              </Anchor>
+                              <ActionIcon size="sm" variant="light" color="blue" onClick={() => openAttachment(r.file)}>
+                                <IconEye size={12} />
+                              </ActionIcon>
                             </Tooltip>
                           ))}
                           <Badge size="xs" variant="light" color="gray" leftSection={<IconPaperclip size={9} />}>
