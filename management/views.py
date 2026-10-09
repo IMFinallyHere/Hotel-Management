@@ -16,9 +16,9 @@ from django.core.exceptions import SuspiciousFileOperation
 from django.http import FileResponse, Http404
 from .models import Rooms, RoomType, CountryCodes, Customers, Configurations, RoomStayLogs, Group, CustomerGroup, RoomsPriceChart, Reservation, ReservationPayment, ReservationReminder, Amenity, StayLogAmenity, RoomNCRequest, Payment, CashWithdrawal, Expense, ExpenseAttachment, ExpenseCategory, Income, IncomeAttachment, IncomeCategory, RoomStatusLog, PaymentMethod, StayVehicle, FoodOrder, FoodOrderReceipt, CancellationLog, CancellationRefund, MoneyEvent, DailySettlement, SettlementMethodBreakdown, StayNote
 from .serializers import RoomSerializer, RoomTypeSerializer, CountryCodeSerializer, CustomerSerializer, ConfigurationSerializer, CheckinSerializer, GroupCustomerSerializer, RoomsPriceChartSerializer, StayLogSerializer, StayLogUpdateSerializer, ReservationSerializer, ReservationReminderSerializer, AmenitySerializer, StayLogAmenitySerializer, ActiveStayLogSerializer, RoomNCRequestSerializer, PaymentSerializer, CashWithdrawalSerializer, ExpenseSerializer, ExpenseAttachmentSerializer, ExpenseCategorySerializer, IncomeSerializer, IncomeAttachmentSerializer, IncomeCategorySerializer, ExtendStaySerializer, GraceSerializer, ShiftRoomSerializer, RoomStatusLogSerializer, PaymentMethodSerializer, StayVehicleSerializer, FoodOrderSerializer, FoodOrderReceiptSerializer, CancellationLogSerializer, StayNoteSerializer
-from .ledger import record_money_event, assert_date_not_settled
+from .ledger import record_money_event, assert_date_not_settled, reverse_linked_events
 from .settlement import compute_settlement_snapshot, serialize_event
-from .permissions import report_permission, HasModelPermission
+from .permissions import report_permission, any_permission, HasModelPermission
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.permissions import DjangoModelPermissions
 from rest_framework.response import Response
@@ -1836,7 +1836,7 @@ class CashWithdrawalDetail(generics.RetrieveUpdateAPIView):
 
 class ExpenseListCreate(generics.ListCreateAPIView):
     serializer_class = ExpenseSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [HasModelPermission.for_model('management', 'expense')]
 
     def get_queryset(self):
         qs = Expense.objects.select_related('recorded_by', 'category', 'payment_method').order_by('-date', '-created_on')
@@ -1852,33 +1852,77 @@ class ExpenseListCreate(generics.ListCreateAPIView):
                 qs = qs.filter(date__lte=end)
         return qs
 
+    @transaction.atomic
     def perform_create(self, serializer):
+        from rest_framework.exceptions import ValidationError
         expense = serializer.save(recorded_by=self.request.user)
-        record_money_event(
-            'expense_paid', expense.amount,
-            payment_method=expense.payment_method,
-            recorded_by=self.request.user,
-            date=expense.date,
-            note=expense.description,
+        try:
+            _record_expense_event(expense, self.request.user)
+        except ValueError as e:
+            raise ValidationError(str(e))
+
+
+def _record_expense_event(expense, user):
+    record_money_event(
+        'expense_paid', expense.amount,
+        payment_method=expense.payment_method,
+        recorded_by=user,
+        date=expense.date,
+        expense=expense,
+        note=expense.description,
+    )
+
+
+def _update_with_ledger(serializer, user, record_event):
+    """Save an Income/Expense edit, replacing its ledger event if a money field changed.
+
+    Records from before the ledger existed have no event; they stay that way.
+    """
+    from rest_framework.exceptions import ValidationError
+    old = type(serializer.instance).objects.select_for_update().get(pk=serializer.instance.pk)
+    try:
+        assert_date_not_settled(old.date)
+        in_ledger = old.money_events.exists()
+        record = serializer.save()
+        money_changed = (
+            old.amount != record.amount
+            or old.payment_method_id != record.payment_method_id
+            or old.date != record.date
         )
+        if money_changed and in_ledger:
+            reverse_linked_events(old, user)
+            record_event(record, user)
+        elif old.description != record.description:
+            record.money_events.update(note=record.description)
+    except ValueError as e:
+        raise ValidationError(str(e))
+
+
+def _destroy_with_ledger(instance, user):
+    from rest_framework.exceptions import ValidationError
+    try:
+        reverse_linked_events(instance, user)
+    except ValueError as e:
+        raise ValidationError(str(e))
+    instance.delete()
 
 
 class ExpenseDetail(generics.RetrieveUpdateDestroyAPIView):
     queryset = Expense.objects.all()
     serializer_class = ExpenseSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [HasModelPermission.for_model('management', 'expense')]
 
+    @transaction.atomic
+    def perform_update(self, serializer):
+        _update_with_ledger(serializer, self.request.user, _record_expense_event)
+
+    @transaction.atomic
     def perform_destroy(self, instance):
-        try:
-            assert_date_not_settled(instance.date)
-        except ValueError as e:
-            from rest_framework.exceptions import ValidationError
-            raise ValidationError(str(e))
-        instance.delete()
+        _destroy_with_ledger(instance, self.request.user)
 
 
 class ExpenseAttachmentCreate(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [any_permission('add_expense', 'change_expense')]
 
     def post(self, request, pk):
         expense = get_object_or_404(Expense, pk=pk)
@@ -1893,7 +1937,7 @@ class ExpenseAttachmentCreate(APIView):
 
 
 class ExpenseAttachmentDelete(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [any_permission('change_expense')]
 
     def delete(self, request, pk):
         att = get_object_or_404(ExpenseAttachment, pk=pk)
@@ -1906,7 +1950,7 @@ class ExpenseAttachmentDelete(APIView):
 
 class IncomeListCreate(generics.ListCreateAPIView):
     serializer_class = IncomeSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [HasModelPermission.for_model('management', 'income')]
 
     def get_queryset(self):
         qs = Income.objects.select_related('recorded_by', 'category', 'payment_method').order_by('-date', '-created_on')
@@ -1922,33 +1966,43 @@ class IncomeListCreate(generics.ListCreateAPIView):
                 qs = qs.filter(date__lte=end)
         return qs
 
+    @transaction.atomic
     def perform_create(self, serializer):
+        from rest_framework.exceptions import ValidationError
         income = serializer.save(recorded_by=self.request.user)
-        record_money_event(
-            'other_income', income.amount,
-            payment_method=income.payment_method,
-            recorded_by=self.request.user,
-            date=income.date,
-            note=income.description,
-        )
+        try:
+            _record_income_event(income, self.request.user)
+        except ValueError as e:
+            raise ValidationError(str(e))
+
+
+def _record_income_event(income, user):
+    record_money_event(
+        'other_income', income.amount,
+        payment_method=income.payment_method,
+        recorded_by=user,
+        date=income.date,
+        income=income,
+        note=income.description,
+    )
 
 
 class IncomeDetail(generics.RetrieveUpdateDestroyAPIView):
     queryset = Income.objects.all()
     serializer_class = IncomeSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [HasModelPermission.for_model('management', 'income')]
 
+    @transaction.atomic
+    def perform_update(self, serializer):
+        _update_with_ledger(serializer, self.request.user, _record_income_event)
+
+    @transaction.atomic
     def perform_destroy(self, instance):
-        try:
-            assert_date_not_settled(instance.date)
-        except ValueError as e:
-            from rest_framework.exceptions import ValidationError
-            raise ValidationError(str(e))
-        instance.delete()
+        _destroy_with_ledger(instance, self.request.user)
 
 
 class IncomeAttachmentCreate(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [any_permission('add_income', 'change_income')]
 
     def post(self, request, pk):
         income = get_object_or_404(Income, pk=pk)
@@ -1963,7 +2017,7 @@ class IncomeAttachmentCreate(APIView):
 
 
 class IncomeAttachmentDelete(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [any_permission('change_income')]
 
     def delete(self, request, pk):
         att = get_object_or_404(IncomeAttachment, pk=pk)
@@ -2119,6 +2173,12 @@ class PLReportView(APIView):
             amenity_revenue += a_rev
             revenue_by_day[log.check_out.date().isoformat()] += r_rev + a_rev
 
+        other_income = Decimal(0)
+        for inc in Income.objects.filter(date__gte=start, date__lte=end):
+            other_income += inc.amount
+            revenue_by_day[inc.date.isoformat()] += inc.amount
+        total_revenue += other_income
+
         expenses = Expense.objects.filter(date__gte=start, date__lte=end).select_related('payment_method')
         total_expenses = sum(e.amount for e in expenses)
         by_payment_type = defaultdict(lambda: Decimal(0))
@@ -2137,7 +2197,7 @@ class PLReportView(APIView):
         return Response({
             'revenue': {
                 'total': float(total_revenue),
-                'by_type': {'room': float(room_revenue), 'amenity': float(amenity_revenue)},
+                'by_type': {'room': float(room_revenue), 'amenity': float(amenity_revenue), 'other_income': float(other_income)},
             },
             'expenses': {
                 'total': float(total_expenses),

@@ -32,6 +32,8 @@ def record_money_event(
     reservation=None,
     cancellation=None,
     food_order=None,
+    income=None,
+    expense=None,
     note='',
 ):
     """Single function responsible for writing every financial movement to MoneyEvent."""
@@ -49,6 +51,8 @@ def record_money_event(
         reservation=reservation,
         cancellation=cancellation,
         food_order=food_order,
+        income=income,
+        expense=expense,
         note=note,
     )
     if payment_method is not None and payment_method.name.strip().lower() == 'cash':
@@ -74,3 +78,31 @@ def assert_date_not_settled(date_val):
     from .models import DailySettlement
     if DailySettlement.objects.filter(date=date_val, status='settled').exists():
         raise ValueError(f'Day {date_val} is already settled. No financial changes allowed.')
+
+
+
+def reverse_linked_events(record, recorded_by=None):
+    """Undo the ledger effect of an Income/Expense record before it is edited or deleted.
+
+    Removes its MoneyEvent(s) and, for cash, adds an opposite cash drawer entry to cancel
+    the one created when it was recorded.
+    """
+    assert_date_not_settled(record.date)
+    for e in list(record.money_events.all()):
+        if e.payment_method is not None and e.payment_method.name.strip().lower() == 'cash':
+            from .models import CashWithdrawal
+            if e.event_type in _CASH_INFLOW:
+                drawer_entry_type = 'debit'
+            elif e.event_type in _CASH_OUTFLOW:
+                drawer_entry_type = 'credit'
+            else:
+                drawer_entry_type = None
+            if drawer_entry_type:
+                CashWithdrawal.objects.create(
+                    amount=e.amount,
+                    reason=f'Reversal – {e.note or e.get_event_type_display()}',
+                    entry_type=drawer_entry_type,
+                    requested_by=recorded_by,
+                    date=e.date,
+                )
+        e.delete()

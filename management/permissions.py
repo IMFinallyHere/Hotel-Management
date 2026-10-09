@@ -9,6 +9,17 @@ def report_permission(codename):
     return _Perm
 
 
+def any_permission(*codenames):
+    """Allow the request if the user holds at least one of the given management permissions."""
+    class _Perm(BasePermission):
+        def has_permission(self, request, view):
+            return request.user.is_authenticated and any(
+                request.user.has_perm(f'management.{c}') for c in codenames
+            )
+    _Perm.__name__ = f'AnyPerm_{"_".join(codenames)}'
+    return _Perm
+
+
 class HasModelPermission(BasePermission):
     """
     Maps HTTP methods to Django's built-in model permissions.

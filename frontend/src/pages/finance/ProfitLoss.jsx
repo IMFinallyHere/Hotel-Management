@@ -45,7 +45,7 @@ export default function ProfitLoss() {
               <Text size="sm" c="dimmed">Total Revenue</Text>
               <Text fw={700} size="xl" c="green">₹{data.revenue.total.toLocaleString()}</Text>
               <Text size="xs" c="dimmed" mt={4}>
-                Room: ₹{data.revenue.by_type.room?.toLocaleString() ?? 0} | Amenity: ₹{data.revenue.by_type.amenity?.toLocaleString() ?? 0}
+                Room: ₹{data.revenue.by_type.room?.toLocaleString() ?? 0} | Amenity: ₹{data.revenue.by_type.amenity?.toLocaleString() ?? 0} | Other: ₹{data.revenue.by_type.other_income?.toLocaleString() ?? 0}
               </Text>
             </Card>
             <Card withBorder p="md">

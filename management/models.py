@@ -386,6 +386,8 @@ class MoneyEvent(models.Model):
     reservation    = models.ForeignKey(Reservation, models.SET_NULL, null=True, blank=True, related_name='money_events')
     cancellation   = models.ForeignKey(CancellationLog, models.SET_NULL, null=True, blank=True, related_name='money_events')
     food_order     = models.ForeignKey(FoodOrder, models.SET_NULL, null=True, blank=True, related_name='money_events')
+    income         = models.ForeignKey(Income, models.SET_NULL, null=True, blank=True, related_name='money_events')
+    expense        = models.ForeignKey(Expense, models.SET_NULL, null=True, blank=True, related_name='money_events')
     note           = models.CharField(max_length=200, blank=True)
 
 
