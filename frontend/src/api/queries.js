@@ -34,6 +34,8 @@ export const fetchReservations = () => api.get('/v1/reservations/').then(r => r.
 export const fetchRoomReservations = (id) => api.get(`/v1/reservations/?room=${id}`).then(r => r.data);
 export const fetchAllCustomers = () => api.get('/v1/customers/').then(r => r.data);
 export const searchCustomers = (search) => api.get('/v1/customers/', { params: { search } }).then(r => r.data);
+// Passing page/page_size makes the API return {count, page, results}; without them it returns the full list
+export const fetchCustomersPage = (params) => api.get('/v1/customers/', { params }).then(r => r.data);
 export const fetchCountryCodes = () => api.get('/v1/country/codes/').then(r => r.data);
 export const fetchGroupCustomers = (groupId) => api.get(`/v1/group/${groupId}/customers/`).then(r => r.data);
 export const fetchPriceChart = () => api.get('/v1/price/chart/').then(r => r.data);
@@ -94,6 +96,7 @@ export const QUERY_KEYS_OPS = {
 
 export const fetchNcRequests = () => api.get('/v1/nc-requests/').then(r => r.data);
 export const fetchCashWithdrawals = () => api.get('/v1/cash-withdrawals/').then(r => r.data);
+export const fetchCashWithdrawalsPage = (params) => api.get('/v1/cash-withdrawals/', { params }).then(r => r.data);
 export const fetchExpenses = (params) => api.get('/v1/expenses/', { params }).then(r => r.data);
 export const fetchIncome = (params) => api.get('/v1/income/', { params }).then(r => r.data);
 export const fetchStayLogPayments = (logId) => api.get(`/v1/stay-logs/${logId}/payments/`).then(r => r.data);

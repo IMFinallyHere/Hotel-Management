@@ -1,25 +1,36 @@
 import { useState } from 'react';
 import dayjs from 'dayjs';
-import { Table, Button, Group, Text, Modal, NumberInput, Textarea, Stack, Badge, SegmentedControl } from '@mantine/core';
+import { Table, Button, Group, Text, Modal, NumberInput, Textarea, Stack, Badge, SegmentedControl, TextInput } from '@mantine/core';
 import { useForm } from '@mantine/form';
-import { useDisclosure } from '@mantine/hooks';
-import { IconPlus } from '@tabler/icons-react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useDisclosure, useDebouncedValue } from '@mantine/hooks';
+import { IconPlus, IconSearch } from '@tabler/icons-react';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import api from '../api/client';
-import { QUERY_KEYS_OPS, fetchCashWithdrawals } from '../api/queries';
+import { QUERY_KEYS_OPS, fetchCashWithdrawalsPage } from '../api/queries';
 import { notifySuccess, notifyError } from '../api/notify';
 import { parseApiError } from '../api/errorUtils';
 import usePermissions from '../hooks/usePermissions';
+import TablePager from '../components/TablePager';
 
 export default function CashDrawer() {
   const qc = useQueryClient();
   const { permissions } = usePermissions();
   const canWithdraw = permissions.add_cashwithdrawal || permissions.is_superuser;
 
-  const { data: withdrawals = [], isLoading } = useQuery({
-    queryKey: QUERY_KEYS_OPS.cashWithdrawals,
-    queryFn: fetchCashWithdrawals,
+  const [search, setSearch] = useState('');
+  const [debouncedSearch] = useDebouncedValue(search.trim(), 300);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState('20');
+  const params = { page, page_size: pageSize };
+  if (debouncedSearch) params.search = debouncedSearch;
+  const { data, isLoading, isFetching } = useQuery({
+    queryKey: [...QUERY_KEYS_OPS.cashWithdrawals, 'page', params],
+    queryFn: () => fetchCashWithdrawalsPage(params),
+    placeholderData: keepPreviousData,
   });
+  const withdrawals = data?.results ?? [];
+  // Server falls back to the last page when the requested one no longer exists
+  if (data?.page && data.page !== page && !isFetching) setPage(data.page);
 
   const [opened, { open, close }] = useDisclosure(false);
 
@@ -34,7 +45,7 @@ export default function CashDrawer() {
   const createMutation = useMutation({
     mutationFn: (values) => api.post('/v1/cash-withdrawals/', values),
     onSuccess: () => {
-      qc.invalidateQueries(QUERY_KEYS_OPS.cashWithdrawals);
+      qc.invalidateQueries({ queryKey: QUERY_KEYS_OPS.cashWithdrawals });
       close();
       form.reset();
       notifySuccess('Entry recorded.');
@@ -42,8 +53,9 @@ export default function CashDrawer() {
     onError: (e) => notifyError(parseApiError(e, 'Failed to record entry.')),
   });
 
-  const totalDebit = withdrawals.filter(w => (w.entry_type ?? 'debit') === 'debit').reduce((s, w) => s + Number(w.amount), 0);
-  const totalCredit = withdrawals.filter(w => w.entry_type === 'credit').reduce((s, w) => s + Number(w.amount), 0);
+  // Totals cover every entry matching the search, not just this page
+  const totalDebit = Number(data?.totals?.debit ?? 0);
+  const totalCredit = Number(data?.totals?.credit ?? 0);
   const net = totalDebit - totalCredit;
 
   return (
@@ -64,6 +76,15 @@ export default function CashDrawer() {
         )}
       </Group>
 
+      <TextInput
+        placeholder="Search reason"
+        leftSection={<IconSearch size={16} />}
+        value={search}
+        onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+        w={260}
+        mb="sm"
+      />
+
       <Table.ScrollContainer minWidth={500}>
         <Table striped highlightOnHover withTableBorder>
           <Table.Thead>
@@ -79,7 +100,7 @@ export default function CashDrawer() {
             {isLoading ? (
               <Table.Tr><Table.Td colSpan={5} ta="center">Loading...</Table.Td></Table.Tr>
             ) : withdrawals.length === 0 ? (
-              <Table.Tr><Table.Td colSpan={5} ta="center">No entries recorded.</Table.Td></Table.Tr>
+              <Table.Tr><Table.Td colSpan={5} ta="center">{debouncedSearch ? 'No entries match your search.' : 'No entries recorded.'}</Table.Td></Table.Tr>
             ) : withdrawals.map((w) => {
               const isCredit = w.entry_type === 'credit';
               return (
@@ -101,6 +122,15 @@ export default function CashDrawer() {
           </Table.Tbody>
         </Table>
       </Table.ScrollContainer>
+
+      <TablePager
+        page={page}
+        pageSize={pageSize}
+        totalCount={data?.count ?? 0}
+        onPageChange={setPage}
+        onPageSizeChange={(v) => { setPageSize(v); setPage(1); }}
+        dimmed={isFetching}
+      />
 
       <Modal opened={opened} onClose={close} title="New Cash Entry" size={{ base: '95%', sm: 'lg' }}>
         <form onSubmit={form.onSubmit(v => createMutation.mutate(v))}>

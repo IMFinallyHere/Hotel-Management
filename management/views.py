@@ -7,7 +7,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from rest_framework import generics
 from rest_framework.views import APIView
 from rest_framework.pagination import PageNumberPagination
-from django.db.models import Q, Count
+from django.db.models import Q, Count, Sum
 from django.db.models import ProtectedError
 from django.db import transaction
 from django.shortcuts import get_object_or_404
@@ -24,6 +24,34 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.permissions import DjangoModelPermissions
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes
+
+
+class StandardPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
+    def paginate_queryset(self, queryset, request, view=None):
+        # Like DRF's, but an out-of-range page (e.g. after deleting the last row on the
+        # last page) falls back to the nearest valid page instead of a 404
+        self.request = request
+        paginator = self.django_paginator_class(queryset, self.get_page_size(request))
+        self.page = paginator.get_page(request.query_params.get(self.page_query_param))
+        return list(self.page)
+
+    def get_paginated_response(self, data):
+        response = super().get_paginated_response(data)
+        response.data['page'] = self.page.number
+        return response
+
+
+class OptionalPagination(StandardPagination):
+    """Pages only when ?page or ?page_size is given, so callers that need the full list keep a plain array."""
+
+    def paginate_queryset(self, queryset, request, view=None):
+        if 'page' not in request.query_params and 'page_size' not in request.query_params:
+            return None
+        return super().paginate_queryset(queryset, request, view)
 
 
 def _parse_money(value, default=Decimal('0')):
@@ -184,12 +212,15 @@ class CustomerListCreate(generics.ListCreateAPIView):
     queryset = Customers.objects.none()
     serializer_class = CustomerSerializer
     permission_classes = [DjangoModelPermissions]
+    pagination_class = OptionalPagination
 
     def get_queryset(self):
         qs = Customers.objects.all()
         search = self.request.query_params.get('search', '').strip()
         if search:
             qs = qs.filter(Q(number__contains=search) | Q(name__icontains=search))
+        if 'page' in self.request.query_params or 'page_size' in self.request.query_params:
+            qs = qs.order_by('-id')  # newest first; stable order needed for paging
         return qs
 
 
@@ -238,12 +269,6 @@ STAY_LOG_PREFETCH = (
     'vehicles',
     'cancellations__cancelled_by',
 )
-
-
-class StayHistoryPagination(PageNumberPagination):
-    page_size = 20
-    page_size_query_param = 'page_size'
-    max_page_size = 100
 
 
 class StayLogListActive(generics.ListAPIView):
@@ -1834,9 +1859,25 @@ class StayLogPaymentDetail(generics.RetrieveDestroyAPIView):
 class CashWithdrawalListCreate(generics.ListCreateAPIView):
     serializer_class = CashWithdrawalSerializer
     permission_classes = [HasModelPermission.for_model('management', 'cashwithdrawal')]
+    pagination_class = OptionalPagination
 
     def get_queryset(self):
-        return CashWithdrawal.objects.select_related('requested_by').order_by('-created_on')
+        qs = CashWithdrawal.objects.select_related('requested_by').order_by('-created_on', '-id')
+        search = self.request.query_params.get('search', '').strip()
+        if search:
+            qs = qs.filter(reason__icontains=search)
+        return qs
+
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        if isinstance(response.data, dict):
+            # A page only holds some entries, so send DR/CR totals for the whole filtered set
+            totals = self.get_queryset().aggregate(
+                debit=Sum('amount', filter=~Q(entry_type='credit')),
+                credit=Sum('amount', filter=Q(entry_type='credit')),
+            )
+            response.data['totals'] = {k: v or 0 for k, v in totals.items()}
+        return response
 
     def perform_create(self, serializer):
         withdrawal = serializer.save(requested_by=self.request.user)
@@ -2541,7 +2582,7 @@ class GSTReportView(APIView):
 class StayLogHistory(generics.ListAPIView):
     serializer_class = ActiveStayLogSerializer
     permission_classes = [IsAuthenticated]
-    pagination_class = StayHistoryPagination
+    pagination_class = StandardPagination
 
     def get_queryset(self):
         qs = RoomStayLogs.objects.filter(check_out__isnull=False) \

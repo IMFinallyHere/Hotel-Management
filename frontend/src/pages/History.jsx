@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
   Table, Button, Badge, Group, TextInput, Text, Stack, Skeleton,
-  Modal, Divider, SimpleGrid, Alert, Pagination, Select,
+  Modal, Divider, SimpleGrid, Alert,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { DatePickerInput } from '@mantine/dates';
@@ -13,6 +13,7 @@ import { QUERY_KEYS_OPS, QUERY_KEYS, fetchStayHistory, fetchConfigurations, fetc
 import { parseConfigs, computeGst, stayGstPercent } from '../utils/configUtils';
 import { computeStayDues } from '../utils/stayBill';
 import InvoiceDocument from '../components/InvoiceDocument';
+import TablePager from '../components/TablePager';
 
 const genderLabel = { male: 'M', female: 'F', trans: 'T', other: 'O' };
 
@@ -431,7 +432,8 @@ export default function History() {
   });
   const logs = data?.results ?? [];
   const totalCount = data?.count ?? 0;
-  const totalPages = Math.max(1, Math.ceil(totalCount / Number(pageSize)));
+  // Server falls back to the last page when the requested one no longer exists
+  if (data?.page && data.page !== page && !isFetching) setPage(data.page);
 
   const { data: configs = [] } = useQuery({ queryKey: QUERY_KEYS.configurations, queryFn: fetchConfigurations });
   const configMap = parseConfigs(configs);
@@ -589,28 +591,14 @@ export default function History() {
         </Table>
       </Table.ScrollContainer>
 
-      {totalCount > 0 && (
-        <Group justify="space-between" wrap="wrap" gap="sm" style={{ opacity: isFetching ? 0.6 : 1 }}>
-          <Text size="sm" c="dimmed">
-            Showing {(page - 1) * Number(pageSize) + 1}–{Math.min(page * Number(pageSize), totalCount)} of {totalCount}
-          </Text>
-          <Group gap="sm">
-            <Select
-              size="xs"
-              w={110}
-              value={pageSize}
-              onChange={(v) => { setPageSize(v ?? '20'); setPage(1); }}
-              data={[
-                { value: '20', label: '20 / page' },
-                { value: '50', label: '50 / page' },
-                { value: '100', label: '100 / page' },
-              ]}
-              allowDeselect={false}
-            />
-            <Pagination size="sm" total={totalPages} value={page} onChange={setPage} />
-          </Group>
-        </Group>
-      )}
+      <TablePager
+        page={page}
+        pageSize={pageSize}
+        totalCount={totalCount}
+        onPageChange={setPage}
+        onPageSizeChange={(v) => { setPageSize(v); setPage(1); }}
+        dimmed={isFetching}
+      />
 
       <StayDetailModal
         log={detailLog}

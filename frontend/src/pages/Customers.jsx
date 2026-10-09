@@ -2,18 +2,19 @@ import { useState, useEffect } from 'react';
 import { Table, Button, Modal, TextInput, Select, FileInput, Group, Text, Grid, NumberInput } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
 import { useForm } from '@mantine/form';
-import { useDisclosure } from '@mantine/hooks';
+import { useDisclosure, useDebouncedValue } from '@mantine/hooks';
 import { modals } from '@mantine/modals';
-import { IconUpload, IconPlus } from '@tabler/icons-react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { IconUpload, IconPlus, IconSearch } from '@tabler/icons-react';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import api from '../api/client';
-import { QUERY_KEYS, fetchAllCustomers, fetchCountryCodes } from '../api/queries';
+import { QUERY_KEYS, fetchCustomersPage, fetchCountryCodes } from '../api/queries';
 import { compressImage } from '../utils/imageUtils';
 import { openAttachment } from '../utils/attachments';
 import { notifySuccess, notifyError } from '../api/notify';
 import { parseApiError } from '../api/errorUtils';
 import usePermissions from '../hooks/usePermissions';
+import TablePager from '../components/TablePager';
 
 const GENDER_OPTIONS = [
   { value: 'male', label: 'Male' },
@@ -28,7 +29,20 @@ export default function Customers() {
   const canAdd    = permissions.add_customers    || permissions.is_superuser;
   const canChange = permissions.change_customers || permissions.is_superuser;
   const canDelete = permissions.delete_customers || permissions.is_superuser;
-  const { data = [], isLoading } = useQuery({ queryKey: QUERY_KEYS.customers, queryFn: fetchAllCustomers });
+  const [search, setSearch] = useState('');
+  const [debouncedSearch] = useDebouncedValue(search.trim(), 300);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState('20');
+  const params = { page, page_size: pageSize };
+  if (debouncedSearch) params.search = debouncedSearch;
+  const { data: pageData, isLoading, isFetching } = useQuery({
+    queryKey: [...QUERY_KEYS.customers, 'page', params],
+    queryFn: () => fetchCustomersPage(params),
+    placeholderData: keepPreviousData,
+  });
+  const data = pageData?.results ?? [];
+  // Server falls back to the last page when the requested one no longer exists
+  if (pageData?.page && pageData.page !== page && !isFetching) setPage(pageData.page);
   const { data: codes = [] } = useQuery({ queryKey: QUERY_KEYS.countryCodes, queryFn: fetchCountryCodes });
   const [opened, { open, close }] = useDisclosure(false);
   const [editing, setEditing] = useState(null);
@@ -118,13 +132,13 @@ export default function Customers() {
         ? api.patch(`/v1/customers/${editing.id}/`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
         : api.post('/v1/customers/', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
     },
-    onSuccess: () => { qc.invalidateQueries(QUERY_KEYS.customers); close(); notifySuccess('Saved.'); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: QUERY_KEYS.customers }); close(); notifySuccess('Saved.'); },
     onError: (e) => notifyError(parseApiError(e, 'Failed to save.')),
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id) => api.delete(`/v1/customers/${id}/`),
-    onSuccess: () => { qc.invalidateQueries(QUERY_KEYS.customers); notifySuccess('Deleted.'); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: QUERY_KEYS.customers }); notifySuccess('Deleted.'); },
     onError: (e) => notifyError(parseApiError(e, 'Failed to delete.')),
   });
 
@@ -170,7 +184,14 @@ export default function Customers() {
 
   return (
     <>
-      <Group mb="md" wrap="wrap">
+      <Group mb="md" wrap="wrap" justify="space-between">
+        <TextInput
+          placeholder="Search name or phone"
+          leftSection={<IconSearch size={16} />}
+          value={search}
+          onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+          w={260}
+        />
         {canAdd && <Button leftSection={<IconPlus size={16} />} onClick={openAdd}>Add Customer</Button>}
       </Group>
 
@@ -193,11 +214,20 @@ export default function Customers() {
           {isLoading ? (
             <Table.Tr><Table.Td colSpan={9} ta="center">Loading...</Table.Td></Table.Tr>
           ) : rows.length === 0 ? (
-            <Table.Tr><Table.Td colSpan={9} ta="center">No customers yet.</Table.Td></Table.Tr>
+            <Table.Tr><Table.Td colSpan={9} ta="center">{debouncedSearch ? 'No customers match your search.' : 'No customers yet.'}</Table.Td></Table.Tr>
           ) : rows}
         </Table.Tbody>
       </Table>
       </Table.ScrollContainer>
+
+      <TablePager
+        page={page}
+        pageSize={pageSize}
+        totalCount={pageData?.count ?? 0}
+        onPageChange={setPage}
+        onPageSizeChange={(v) => { setPageSize(v); setPage(1); }}
+        dimmed={isFetching}
+      />
 
       <Modal opened={opened} onClose={close} title={editing ? 'Edit Customer' : 'Add Customer'} size="xl">
         <form onSubmit={form.onSubmit(v => saveMutation.mutate(v))}>
