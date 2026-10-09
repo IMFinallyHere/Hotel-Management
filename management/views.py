@@ -1647,6 +1647,8 @@ class UserPermissionsView(APIView):
             'view_staff_sales_report',
             'view_expense_report',
             'view_income_report',
+            'view_cancellation_report',
+            'view_pending_dues_report',
             'view_reservationreminder',
             'view_daily_settlement',
             'manage_daily_settlement',
