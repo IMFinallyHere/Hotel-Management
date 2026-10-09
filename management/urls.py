@@ -24,7 +24,7 @@ from .views import (RoomTypeListCreate, RoomTypeDetail, RoomListCreate, RoomDeta
                     StayVehicleCreate, StayVehicleDelete,
                     FoodOrderListCreate, FoodOrderDetail, FoodOrderReceiptCreate, FoodOrderReceiptDelete,
                     PLReportView, StaffSalesView, ExpenseReportView, IncomeReportView,
-                    ExtendStay, GrantGrace, ShiftRoom, GSTReportView, StayLogHistory,
+                    ExtendStay, GrantGrace, ShiftRoom, GSTReportView, StayLogHistory, PendingDuesReportView,
                     ReservationReminderListCreate, ReservationReminderDetail,
                     SettlementView, ServeMediaView)
 from .auth_views import UserListCreate, UserDetail, GroupListCreate, GroupDetail, PermissionListView
@@ -111,6 +111,7 @@ urlpatterns = [
     path('reports/stay-duration/', StayDurationView.as_view(), name='report-stay-duration'),
     path('reports/upsell/', UpsellReportView.as_view(), name='report-upsell'),
     path('reports/pipeline/', PipelineReportView.as_view(), name='report-pipeline'),
+    path('reports/pending-dues/', PendingDuesReportView.as_view(), name='report-pending-dues'),
     path('finance/pl/', PLReportView.as_view(), name='finance-pl'),
     path('finance/staff-sales/', StaffSalesView.as_view(), name='finance-staff-sales'),
     path('finance/expenses/', ExpenseReportView.as_view(), name='finance-expenses'),

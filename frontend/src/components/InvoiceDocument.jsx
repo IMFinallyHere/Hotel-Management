@@ -1,5 +1,6 @@
 import { Document, Page, Text, View, StyleSheet, Font } from '@react-pdf/renderer';
 import dayjs from 'dayjs';
+import { stayGstPercent } from '../utils/configUtils';
 import SegoeUiRegular from '../assets/fonts/segoeui.ttf';
 import SegoeUiBold from '../assets/fonts/segoeuib.ttf';
 
@@ -139,7 +140,7 @@ export default function InvoiceDocument({ log, roomNumber, roomTypeName, configM
   const hotelAddress = configMap?.hotel_address || '';
   const hotelPhone   = configMap?.hotel_phone   || '';
   const hotelEmail   = configMap?.hotel_email   || '';
-  const gstPercent   = Number(configMap?.gst_percent ?? 0);
+  const gstPercent   = Number(stayGstPercent(log, configMap));
 
   const fmt = (n) => `${cur}${Number(n).toLocaleString('en-IN')}`;
 
@@ -180,11 +181,11 @@ export default function InvoiceDocument({ log, roomNumber, roomTypeName, configM
   const extraBedTotal   = log.extra_bed * Number(log.extra_per_bed_price) * nights;
   const amenities       = log.amenities || [];
   const amenityRows     = amenities.map(a => ({
-    name: a.name,
+    name: a.amenity_name,
     isPerNight: a.charge_type === 'per_night',
     qty: a.quantity,
-    rate: Number(a.price),
-    total: Number(a.price) * a.quantity * (a.charge_type === 'per_night' ? nights : 1),
+    rate: Number(a.amenity_price),
+    total: Number(a.amenity_price) * a.quantity * (a.charge_type === 'per_night' ? nights : 1),
   }));
   const amenityTotal = amenityRows.reduce((sum, a) => sum + a.total, 0);
   const overtimeFeeCharged = Number(log.overtime_fee_charged ?? 0);

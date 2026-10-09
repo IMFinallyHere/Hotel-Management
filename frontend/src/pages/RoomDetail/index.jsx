@@ -15,7 +15,7 @@ import {
 } from '../../api/queries';
 import { notifySuccess, notifyError } from '../../api/notify';
 import { parseApiError } from '../../api/errorUtils';
-import { parseConfigs, isLogOvertime, computeOvertimeFee, computeGst } from '../../utils/configUtils';
+import { parseConfigs, isLogOvertime, computeOvertimeFee, computeGst, stayGstPercent } from '../../utils/configUtils';
 import StatusTab from './StatusTab';
 import ReservationsTab from './ReservationsTab';
 import RoomDetailsTab from './RoomDetailsTab';
@@ -156,10 +156,10 @@ export default function RoomDetail() {
     const nights = Math.max(1, dayjs().diff(dayjs(activeLog.check_in), 'day'));
     const roomTotal = (Number(activeLog.price) + activeLog.extra_bed * Number(activeLog.extra_per_bed_price)) * nights;
     const amenityTotal = (activeLog.amenities || []).reduce((sum, a) =>
-      sum + Number(a.price) * a.quantity * (a.charge_type === 'per_night' ? nights : 1), 0);
-    const gstAmount = computeGst(activeLog, nights, configMap['gst_percent']);
+      sum + Number(a.amenity_price) * a.quantity * (a.charge_type === 'per_night' ? nights : 1), 0);
+    const gstAmount = computeGst(activeLog, nights, stayGstPercent(activeLog, configMap), amenityTotal);
     const billTotal = activeLog.is_nc ? 0 : (activeLog.gst_inclusive ? (roomTotal + amenityTotal + fee) : (roomTotal + amenityTotal + fee + gstAmount));
-    const gstPct = Number(configMap['gst_percent'] ?? 0) / 100;
+    const gstPct = Number(stayGstPercent(activeLog, configMap)) / 100;
     const unpaidFood = (activeLog.food_orders || []).filter(o => !o.is_paid)
       .reduce((s, o) => s + Number(o.amount) + (o.food_gst_inclusive ? 0 : Math.round(Number(o.amount) * gstPct)), 0);
     const totalPaid = (activeLog.payments || []).reduce((s, p) => s + Number(p.amount), 0);

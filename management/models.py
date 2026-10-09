@@ -1,3 +1,5 @@
+from decimal import Decimal, InvalidOperation
+
 from django.db import models
 from django.contrib.auth.models import User
 from django.core.validators import FileExtensionValidator
@@ -118,6 +120,19 @@ class RoomStayLogs(models.Model):
     male_count = models.PositiveSmallIntegerField(default=0)
     female_count = models.PositiveSmallIntegerField(default=0)
     child_count = models.PositiveSmallIntegerField(default=0)
+    # GST rate in effect when the stay was created, so later changes to the
+    # gst_percent configuration don't re-price old stays. Null for stays
+    # created before this field existed — those fall back to the current config.
+    gst_percent = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+
+    def save(self, *args, **kwargs):
+        if self._state.adding and self.gst_percent is None:
+            cfg = Configurations.objects.filter(key='gst_percent').values_list('value', flat=True).first()
+            try:
+                self.gst_percent = Decimal(cfg) if cfg else Decimal(0)
+            except InvalidOperation:
+                self.gst_percent = Decimal(0)
+        super().save(*args, **kwargs)
 
 
 class Configurations(models.Model):
@@ -223,6 +238,7 @@ class ReportPermissions(models.Model):
             ('view_expense_report', 'Can view expense report'),
             ('view_income_report', 'Can view income report'),
             ('view_cancellation_report', 'Can view cancellation report'),
+            ('view_pending_dues_report', 'Can view pending dues report'),
             ('view_daily_settlement', 'Can view daily settlement'),
             ('manage_daily_settlement', 'Can settle/manage daily settlement'),
         ]

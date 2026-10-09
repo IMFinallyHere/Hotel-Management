@@ -5,6 +5,11 @@ export function parseConfigs(configs) {
   return Object.fromEntries((configs || []).map(c => [c.key, c.value]));
 }
 
+// GST rate (%) for a stay: the rate saved on the stay at check-in, else the current config
+export function stayGstPercent(log, configMap) {
+  return log?.gst_percent ?? configMap?.['gst_percent'] ?? 0;
+}
+
 // Compute overtime state from a stay log + configMap
 export function isLogOvertime(log) {
   if (!log?.expected_checkout) return false;
@@ -20,7 +25,7 @@ export function computeOvertimeFee(log) {
   return Number(log.overtime_rate);
 }
 
-// Compute GST on room charges only (nightly rate × nights + extra bed × nights)
+// Compute GST on room charges (nightly rate × nights + extra bed × nights) plus amenities
 // When gst_inclusive, GST is extracted from the price (already included), not added on top.
 export function computeGst(log, nights, gstPercent, amenityTotal = 0) {
   if (!log?.gst_applied || log.is_nc) return 0;

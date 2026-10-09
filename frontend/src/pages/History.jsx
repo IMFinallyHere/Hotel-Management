@@ -10,7 +10,8 @@ import { IconSearch, IconFileText, IconEye, IconAlertTriangle } from '@tabler/ic
 import { useQuery } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import { QUERY_KEYS_OPS, QUERY_KEYS, fetchStayHistory, fetchConfigurations, fetchRoomTypes, fetchRooms } from '../api/queries';
-import { parseConfigs, computeGst } from '../utils/configUtils';
+import { parseConfigs, computeGst, stayGstPercent } from '../utils/configUtils';
+import { computeStayDues } from '../utils/stayBill';
 import InvoiceDocument from '../components/InvoiceDocument';
 
 const genderLabel = { male: 'M', female: 'F', trans: 'T', other: 'O' };
@@ -48,11 +49,12 @@ function StayDetailModal({ log, opened, onClose, configMap, roomMap, roomTypeMap
   const nights = log.check_out
     ? Math.max(1, dayjs(log.check_out).diff(dayjs(log.check_in), 'day'))
     : 1;
-  const gstPct = Number(configMap['gst_percent'] ?? 0) / 100;
+  const gstRate = stayGstPercent(log, configMap);
+  const gstPct = Number(gstRate) / 100;
   const roomTotal = (Number(log.price) + log.extra_bed * Number(log.extra_per_bed_price)) * nights;
   const amenityTotal = (log.amenities || []).reduce((sum, a) =>
     sum + Number(a.amenity_price ?? a.price) * a.quantity * (a.charge_type === 'per_night' ? nights : 1), 0);
-  const gstAmount = computeGst(log, nights, configMap['gst_percent'], amenityTotal);
+  const gstAmount = computeGst(log, nights, gstRate, amenityTotal);
   const overtimeFeeCharged = Number(log.overtime_fee_charged ?? 0);
   const overtimeFeeDefault = Number(log.overtime_fee_default ?? 0);
   const overtimeWaived = Math.max(0, overtimeFeeDefault - overtimeFeeCharged);
@@ -60,13 +62,7 @@ function StayDetailModal({ log, opened, onClose, configMap, roomMap, roomTypeMap
   const totalFood = (log.food_orders || []).reduce((s, o) => s + foodEff(o), 0);
   const isCancelled = !!log.cancellation;
   const cancellationFee = isCancelled ? Number(log.cancellation.cancellation_fee) : 0;
-  const billTotal = isCancelled ? cancellationFee :
-    log.is_nc ? 0 :
-    (log.gst_inclusive
-      ? (roomTotal + amenityTotal + overtimeFeeCharged)
-      : (roomTotal + amenityTotal + overtimeFeeCharged + gstAmount)) + totalFood;
-  const totalPaid = (log.payments || []).reduce((s, p) => s + Number(p.amount), 0);
-  const balance = billTotal - totalPaid;
+  const { billTotal, totalPaid, due: balance } = computeStayDues(log, configMap, roomMap[log.room]);
 
   const room = roomMap[log.room];
   const roomNumber = room?.room_number ?? String(log.room);
@@ -248,7 +244,7 @@ function StayDetailModal({ log, opened, onClose, configMap, roomMap, roomTypeMap
             {/* GST */}
             {gstAmount > 0 && (
               <BillingRow
-                label={`${log.gst_inclusive ? 'Incl. ' : '+ '}GST (${configMap['gst_percent']}%)`}
+                label={`${log.gst_inclusive ? 'Incl. ' : '+ '}GST (${Number(gstRate)}%)`}
                 value={`₹${gstAmount.toLocaleString()}`}
               />
             )}
@@ -264,7 +260,7 @@ function StayDetailModal({ log, opened, onClose, configMap, roomMap, roomTypeMap
         )}
 
         <Divider my={6} />
-        <BillingRow label="Total" value={log.is_nc ? '₹0 (NC)' : `₹${billTotal.toLocaleString()}`} highlight />
+        <BillingRow label="Total" value={log.is_nc && !billTotal ? '₹0 (NC)' : `₹${billTotal.toLocaleString()}`} highlight />
         <BillingRow label="Total received" value={`₹${totalPaid.toLocaleString()}`} />
         <Group justify="space-between" py={4} mt={2}
           style={{ borderTop: '2px solid var(--mantine-color-gray-4)', background: balance > 0 ? 'var(--mantine-color-red-0)' : 'var(--mantine-color-teal-0)', borderRadius: 4, padding: '6px 4px' }}>
@@ -440,8 +436,6 @@ export default function History() {
   const { data: allRooms = [] } = useQuery({ queryKey: QUERY_KEYS.rooms, queryFn: fetchRooms });
   const roomMap = Object.fromEntries(allRooms.map(r => [r.id, r]));
 
-  const gstPct = Number(configMap['gst_percent'] ?? 0) / 100;
-
   const applyFilters = () => {
     setAppliedSearch(search);
     setAppliedRange(dateRange);
@@ -457,20 +451,7 @@ export default function History() {
   };
 
   const rows = logs.map((log) => {
-    const nights = log.check_out
-      ? Math.max(1, dayjs(log.check_out).diff(dayjs(log.check_in), 'day'))
-      : 1;
-    const roomTotal = (Number(log.price) + log.extra_bed * Number(log.extra_per_bed_price)) * nights;
-    const amenityTotal = (log.amenities || []).reduce((sum, a) =>
-      sum + Number(a.amenity_price ?? a.price) * a.quantity * (a.charge_type === 'per_night' ? nights : 1), 0);
-    const gstAmount = computeGst(log, nights, configMap['gst_percent'], amenityTotal);
-    const overtimeFeeCharged = Number(log.overtime_fee_charged ?? 0);
-    const foodEff = (o) => Number(o.amount) + (o.food_gst_inclusive ? 0 : Math.round(Number(o.amount) * gstPct));
-    const totalFood = (log.food_orders || []).reduce((s, o) => s + foodEff(o), 0);
-    const total = log.is_nc ? 0 :
-      (log.gst_inclusive
-        ? (roomTotal + amenityTotal + overtimeFeeCharged)
-        : (roomTotal + amenityTotal + overtimeFeeCharged + gstAmount)) + totalFood;
+    const { nights, billTotal: total, totalPaid, due } = computeStayDues(log, configMap, roomMap[log.room]);
     const guests = (log.customers || []).map(c => c.name).join(', ') || '—';
     const room = roomMap[log.room];
     const roomNumber = room?.room_number ?? String(log.room);
@@ -493,7 +474,11 @@ export default function History() {
         <Table.Td>{log.check_out ? dayjs(log.check_out).format('DD MMM YYYY') : '—'}</Table.Td>
         <Table.Td>{nights}</Table.Td>
         <Table.Td fw={600}>
-          {log.is_nc ? <Badge color="grape" variant="light">₹0 (NC)</Badge> : `₹${total}`}
+          {log.is_nc && !total ? <Badge color="grape" variant="light">₹0 (NC)</Badge> : `₹${total}`}
+        </Table.Td>
+        <Table.Td>₹{totalPaid}</Table.Td>
+        <Table.Td fw={600} c={due > 0 ? 'red' : due < 0 ? 'orange' : 'teal'}>
+          {due > 0 ? `₹${due}` : due < 0 ? `₹${Math.abs(due)} over` : '₹0'}
         </Table.Td>
         <Table.Td onClick={(e) => e.stopPropagation()}>
           <Group gap={4}>
@@ -571,6 +556,8 @@ export default function History() {
               <Table.Th>Check-Out</Table.Th>
               <Table.Th>Nights</Table.Th>
               <Table.Th>Total</Table.Th>
+              <Table.Th>Paid</Table.Th>
+              <Table.Th>Due</Table.Th>
               <Table.Th>Actions</Table.Th>
             </Table.Tr>
           </Table.Thead>
@@ -578,14 +565,14 @@ export default function History() {
             {isLoading ? (
               Array.from({ length: 5 }).map((_, i) => (
                 <Table.Tr key={i}>
-                  {Array.from({ length: 7 }).map((_, j) => (
+                  {Array.from({ length: 9 }).map((_, j) => (
                     <Table.Td key={j}><Skeleton height={16} /></Table.Td>
                   ))}
                 </Table.Tr>
               ))
             ) : rows.length === 0 ? (
               <Table.Tr>
-                <Table.Td colSpan={7} ta="center">
+                <Table.Td colSpan={9} ta="center">
                   <Text size="sm" c="dimmed">No past stays found.</Text>
                 </Table.Td>
               </Table.Tr>

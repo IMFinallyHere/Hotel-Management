@@ -152,7 +152,8 @@ class StayLogSerializer(serializers.ModelSerializer):
                   'expected_checkout', 'overtime_rate', 'overtime_fee_charged', 'overtime_fee_default',
                   'grace_until', 'is_early_checkin', 'gst_applied', 'gst_inclusive',
                   'shifted_from', 'shift_reason', 'is_ac', 'checked_in_by_name', 'checked_out_by_name',
-                  'male_count', 'female_count', 'child_count']
+                  'male_count', 'female_count', 'child_count', 'gst_percent']
+        read_only_fields = ['gst_percent']
 
 
 class StayLogUpdateSerializer(serializers.ModelSerializer):

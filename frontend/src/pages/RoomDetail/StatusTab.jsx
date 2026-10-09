@@ -28,7 +28,7 @@ import { CustomerTable } from '../../components/CustomerTable';
 import GuestForm, { createEmptyGuest } from '../../components/GuestForm';
 import { notifySuccess, notifyError } from '../../api/notify';
 import { parseApiError } from '../../api/errorUtils';
-import { parseConfigs, isLogOvertime, computeOvertimeFee, computeGst } from '../../utils/configUtils';
+import { parseConfigs, isLogOvertime, computeOvertimeFee, computeGst, stayGstPercent } from '../../utils/configUtils';
 
 function DescRow({ label, value, highlight }) {
   return (
@@ -505,14 +505,15 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
     const roomCost = (Number(activeLog.price) + activeLog.extra_bed * Number(activeLog.extra_per_bed_price)) * nights;
     const logAmenities = activeLog.amenities || [];
     const amenityCost = logAmenities.reduce((sum, a) =>
-      sum + Number(a.price) * a.quantity * (a.charge_type === 'per_night' ? nights : 1), 0);
+      sum + Number(a.amenity_price) * a.quantity * (a.charge_type === 'per_night' ? nights : 1), 0);
     const overtimeFee = isLogOvertime(activeLog)
       ? (Number(room.overtime_fee) > 0 ? Number(room.overtime_fee) : computeOvertimeFee(activeLog))
       : 0;
-    const gstAmount = computeGst(activeLog, nights, configMap['gst_percent']);
+    const gstRate = stayGstPercent(activeLog, configMap);
+    const gstAmount = computeGst(activeLog, nights, gstRate, amenityCost);
     const totalCost = activeLog.is_nc ? 0 : (activeLog.gst_inclusive ? (roomCost + amenityCost + overtimeFee) : (roomCost + amenityCost + overtimeFee + gstAmount));
     const foodOrders = activeLog.food_orders || [];
-    const gstPct = Number(configMap['gst_percent'] ?? 0) / 100;
+    const gstPct = Number(gstRate) / 100;
     const foodEffective = (o) => Number(o.amount) + (o.food_gst_inclusive ? 0 : Math.round(Number(o.amount) * gstPct));
     const totalFood = foodOrders.reduce((s, o) => s + foodEffective(o), 0);
     const foodGst = foodOrders.filter(o => !o.food_gst_inclusive).reduce((s, o) => s + Math.round(Number(o.amount) * gstPct), 0);
@@ -562,7 +563,7 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
                     <DescRow label="Overtime Fee" value={`₹${overtimeFee}`} />
                   )}
                   {gstAmount > 0 && (
-                    <DescRow label={`GST (${configMap['gst_percent']}%)${activeLog.gst_inclusive ? ' (incl.)' : ''}`} value={`₹${gstAmount}`} />
+                    <DescRow label={`GST (${Number(gstRate)}%)${activeLog.gst_inclusive ? ' (incl.)' : ''}`} value={`₹${gstAmount}`} />
                   )}
                   <DescRow label="Total Cost" value={`₹${totalCost}`} />
                   <DescRow label="Advance Paid" value={`₹${totalPaid}`} />
@@ -570,7 +571,7 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
                     <DescRow label="Food Orders" value={`₹${totalFood}`} />
                   )}
                   {foodGst > 0 && (
-                    <DescRow label={`Food GST (${configMap['gst_percent']}%)`} value={`₹${foodGst}`} />
+                    <DescRow label={`Food GST (${Number(gstRate)}%)`} value={`₹${foodGst}`} />
                   )}
                   {paidFood > 0 && (
                     <DescRow label="Food Paid" value={`₹${paidFood}`} />
@@ -704,7 +705,7 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
             <Group gap="xs" wrap="wrap">
               {logAmenities.map(a => (
                 <Badge key={a.id} variant="light" size="lg">
-                  {a.name} x{a.quantity} — ₹{Number(a.price) * a.quantity * (a.charge_type === 'per_night' ? nights : 1)}
+                  {a.amenity_name} x{a.quantity} — ₹{Number(a.amenity_price) * a.quantity * (a.charge_type === 'per_night' ? nights : 1)}
                 </Badge>
               ))}
             </Group>
@@ -981,11 +982,11 @@ export default function StatusTab({ room, activeLogs, isReservedToday }) {
               <Table.Tbody>
                 {logAmenities.map(a => (
                   <Table.Tr key={a.id}>
-                    <Table.Td>{a.name}</Table.Td>
+                    <Table.Td>{a.amenity_name}</Table.Td>
                     <Table.Td>{a.quantity}</Table.Td>
-                    <Table.Td>₹{a.price}</Table.Td>
+                    <Table.Td>₹{a.amenity_price}</Table.Td>
                     <Table.Td><Badge size="sm" variant="light">{a.charge_type === 'per_night' ? 'Per Night' : 'Flat'}</Badge></Table.Td>
-                    <Table.Td>₹{Number(a.price) * a.quantity * (a.charge_type === 'per_night' ? nights : 1)}</Table.Td>
+                    <Table.Td>₹{Number(a.amenity_price) * a.quantity * (a.charge_type === 'per_night' ? nights : 1)}</Table.Td>
                     <Table.Td>
                       <ActionIcon color="red" variant="light" onClick={() => removeAmenityMutation.mutate(a.id)}>
                         <IconTrash size={14} />

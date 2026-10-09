@@ -2,7 +2,7 @@ import json
 import statistics
 from collections import defaultdict
 from datetime import timedelta, date as date_type
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from rest_framework import generics
 from rest_framework.views import APIView
@@ -2408,7 +2408,7 @@ class GSTReportView(APIView):
             gst_applied=True,
             check_out__date__gte=start,
             check_out__date__lte=end,
-        ).select_related('room', 'group').prefetch_related('group__customers__customer')
+        ).select_related('room', 'group').prefetch_related('group__customers__customer', 'amenities__amenity')
 
         entries = []
         total_gst = Decimal(0)
@@ -2416,8 +2416,19 @@ class GSTReportView(APIView):
 
         for log in logs:
             nights = max(1, (log.check_out.date() - log.check_in.date()).days)
-            room_base = (log.price + log.extra_bed * log.extra_per_bed_price) * nights
-            gst_amount = room_base * gst_rate
+            # GST base = room + extra beds + amenities, same as the invoice
+            amenity_total = sum(
+                sa.amenity.price * sa.quantity * (nights if sa.amenity.charge_type == 'per_night' else 1)
+                for sa in log.amenities.all()
+            )
+            room_base = (log.price + log.extra_bed * log.extra_per_bed_price) * nights + amenity_total
+            log_rate = log.gst_percent / 100 if log.gst_percent is not None else gst_rate
+            if log.is_nc:
+                gst_amount = Decimal(0)
+            elif log.gst_inclusive:
+                gst_amount = (room_base - room_base / (1 + log_rate)).quantize(Decimal('1'), ROUND_HALF_UP)
+            else:
+                gst_amount = (room_base * log_rate).quantize(Decimal('1'), ROUND_HALF_UP)
             total_room_revenue += room_base
             total_gst += gst_amount
             guests = [cg.customer.name for cg in log.group.customers.all()]
@@ -2429,6 +2440,8 @@ class GSTReportView(APIView):
                 'check_out': log.check_out.date().isoformat(),
                 'nights': nights,
                 'room_base': float(room_base),
+                'amenity_total': float(amenity_total),
+                'gst_rate': float(log_rate * 100),
                 'gst_amount': float(gst_amount),
             })
 
@@ -2477,6 +2490,43 @@ class StayLogHistory(generics.ListAPIView):
         if end:
             qs = qs.filter(check_out__date__lte=end)
         return qs
+
+
+class PendingDuesReportView(generics.ListAPIView):
+    """Active stays plus checked-out stays (filtered by check-in date); dues are computed client-side."""
+    serializer_class = ActiveStayLogSerializer
+    permission_classes = [report_permission('view_pending_dues_report')]
+
+    def get_queryset(self):
+        qs = RoomStayLogs.objects.filter(cancellations__isnull=True) \
+            .select_related('room', 'group', 'checked_in_by', 'checked_out_by') \
+            .prefetch_related(
+                'group__customers__customer',
+                'amenities__amenity',
+                'payments__processed_by',
+                'payments__payment_method',
+                'nc_requests',
+                'food_orders__payment_method',
+                'food_orders__receipts',
+                'food_orders__ordered_by',
+                'notes__created_by',
+                'vehicles',
+                'cancellations__cancelled_by',
+            ) \
+            .order_by('check_in')
+
+        p = self.request.query_params
+        checked_out = Q(check_out__isnull=False)
+        if p.get('from_date'):
+            checked_out &= Q(check_in__date__gte=p['from_date'])
+        if p.get('to_date'):
+            checked_out &= Q(check_in__date__lte=p['to_date'])
+        scope = p.get('scope', 'all')
+        if scope == 'active':
+            return qs.filter(check_out__isnull=True)
+        if scope == 'checked_out':
+            return qs.filter(checked_out)
+        return qs.filter(Q(check_out__isnull=True) | checked_out)
 
 
 class ReservationReminderListCreate(generics.ListCreateAPIView):

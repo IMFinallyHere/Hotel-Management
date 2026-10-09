@@ -65,6 +65,7 @@ export const REPORT_QUERY_KEYS = {
   expenseReport: (params) => ['expense-report', params],
   incomeReport: (params) => ['income-report', params],
   cancellationReport: (params) => ['cancellation-report', params],
+  pendingDuesReport: (params) => ['pending-dues-report', params],
 };
 
 export const fetchUserPermissions = () => api.get('/v1/user/permissions/').then(r => r.data);
@@ -103,6 +104,7 @@ export const fetchIncomeReport = (params) => api.get('/v1/finance/income/', { pa
 export const fetchStayHistory = (params) => api.get('/v1/stay-logs/history/', { params }).then(r => r.data);
 export const fetchGSTReport = (params) => api.get('/v1/reports/gst/', { params }).then(r => r.data);
 export const fetchCancellationReport = (params) => api.get('/v1/reports/cancellations/', { params }).then(r => r.data);
+export const fetchPendingDuesReport = (params) => api.get('/v1/reports/pending-dues/', { params }).then(r => r.data);
 export const fetchDueReminders = () => api.get('/v1/reminders/').then(r => r.data);
 
 export const addStayNote = (logId, text) =>

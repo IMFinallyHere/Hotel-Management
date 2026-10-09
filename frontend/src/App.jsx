@@ -9,7 +9,7 @@ import {
   IconTrendingUp, IconClock, IconBedFilled, IconTimeline,
   IconShieldLock, IconUserCog, IconLock, IconPackage,
   IconBan, IconCash, IconReceipt, IconScale, IconCoinRupee, IconBell, IconCalendarStats, IconTag,
-  IconMoneybag, IconReportMoney, IconTags,
+  IconMoneybag, IconReportMoney, IconTags, IconAlertCircle,
 } from '@tabler/icons-react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { lazy, Suspense } from 'react';
@@ -55,6 +55,7 @@ const GSTReport            = lazy(() => import('./pages/GSTReport'));
 const BulkBooking          = lazy(() => import('./pages/BulkBookingModal'));
 const Reservations         = lazy(() => import('./pages/Reservations'));
 const CancellationReport   = lazy(() => import('./pages/CancellationReport'));
+const PendingDuesReport    = lazy(() => import('./pages/PendingDuesReport'));
 const Settlement           = lazy(() => import('./pages/Settlement'));
 import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
 import { useState, useEffect } from 'react';
@@ -348,6 +349,15 @@ function AppLayout() {
                 leftSection={<IconBan size={14} color="rgba(255,255,255,0.6)" />}
                 onClick={() => { navigate('/reports/cancellations'); closeNav(); }}
                 active={path === '/reports/cancellations'}
+              />
+            )}
+            {(permissions.view_pending_dues_report || permissions.is_superuser) && (
+              <NavLink
+                {...NL}
+                label={nl('Pending Dues')}
+                leftSection={<IconAlertCircle size={14} color="rgba(255,255,255,0.6)" />}
+                onClick={() => { navigate('/reports/pending-dues'); closeNav(); }}
+                active={path === '/reports/pending-dues'}
               />
             )}
             {permissions.view_clv_report && (
@@ -661,6 +671,7 @@ function AppLayout() {
           <Route path="/history" element={<History />} />
           <Route path="/reports/gst" element={<GSTReport />} />
           <Route path="/reports/cancellations" element={<CancellationReport />} />
+          <Route path="/reports/pending-dues" element={<PendingDuesReport />} />
           <Route path="/settlement" element={<Settlement />} />
           <Route path="/admin/users" element={<UserManagement />} />
           <Route path="/admin/groups" element={<GroupManagement />} />

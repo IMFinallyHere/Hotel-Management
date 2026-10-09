@@ -54,7 +54,7 @@ export default function GSTReport() {
       ) : data && (
         <SimpleGrid cols={3}>
           <StatCard label="Total GST Collected" value={`₹${data.total_gst.toLocaleString('en-IN')}`} color="teal" />
-          <StatCard label="Total Room Revenue (GST Base)" value={`₹${data.total_room_revenue.toLocaleString('en-IN')}`} color="blue" />
+          <StatCard label="Total GST Base (Room + Amenities)" value={`₹${data.total_room_revenue.toLocaleString('en-IN')}`} color="blue" />
           <StatCard label="GST Rate" value={`${data.gst_rate}%`} color="grape" />
         </SimpleGrid>
       )}
@@ -68,7 +68,7 @@ export default function GSTReport() {
               <Table.Th>Check-In</Table.Th>
               <Table.Th>Check-Out</Table.Th>
               <Table.Th>Nights</Table.Th>
-              <Table.Th>Room Base (₹)</Table.Th>
+              <Table.Th>GST Base (₹)</Table.Th>
               <Table.Th>GST (₹)</Table.Th>
             </Table.Tr>
           </Table.Thead>
