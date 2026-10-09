@@ -6,6 +6,7 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from rest_framework import generics
 from rest_framework.views import APIView
+from rest_framework.pagination import PageNumberPagination
 from django.db.models import Q, Count
 from django.db.models import ProtectedError
 from django.db import transaction
@@ -222,11 +223,33 @@ class RoomsPriceChartDetail(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = [DjangoModelPermissions]
 
 
+# Everything ActiveStayLogSerializer reads, fetched in bulk so a list doesn't query per stay
+STAY_LOG_PREFETCH = (
+    'group__customers__customer',
+    'amenities__amenity',
+    'amenities__added_by',
+    'payments__processed_by',
+    'payments__payment_method',
+    'nc_requests',
+    'food_orders__payment_method',
+    'food_orders__receipts',
+    'food_orders__ordered_by',
+    'notes__created_by',
+    'vehicles',
+    'cancellations__cancelled_by',
+)
+
+
+class StayHistoryPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
+
 class StayLogListActive(generics.ListAPIView):
-    queryset = RoomStayLogs.objects.filter(check_out=None).select_related('checked_in_by').prefetch_related(
-        'group__customers__customer', 'amenities__amenity', 'payments__processed_by', 'nc_requests',
-        'vehicles', 'food_orders__payment_method', 'food_orders__receipts', 'food_orders__ordered_by',
-    )
+    queryset = RoomStayLogs.objects.filter(check_out=None) \
+        .select_related('room', 'group', 'checked_in_by', 'checked_out_by') \
+        .prefetch_related(*STAY_LOG_PREFETCH)
     serializer_class = ActiveStayLogSerializer
     permission_classes = [DjangoModelPermissions]
 
@@ -2518,25 +2541,13 @@ class GSTReportView(APIView):
 class StayLogHistory(generics.ListAPIView):
     serializer_class = ActiveStayLogSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class = StayHistoryPagination
 
     def get_queryset(self):
         qs = RoomStayLogs.objects.filter(check_out__isnull=False) \
             .select_related('room', 'group', 'checked_in_by', 'checked_out_by') \
-            .prefetch_related(
-                'group__customers__customer',
-                'amenities__amenity',
-                'amenities__added_by',
-                'payments__processed_by',
-                'payments__payment_method',
-                'nc_requests',
-                'food_orders__payment_method',
-                'food_orders__receipts',
-                'food_orders__ordered_by',
-                'notes__created_by',
-                'vehicles',
-                'cancellations__cancelled_by',
-            ) \
-            .order_by('-check_out')
+            .prefetch_related(*STAY_LOG_PREFETCH) \
+            .order_by('-check_out', '-id')
 
         search = self.request.query_params.get('search', '').strip()
         start = self.request.query_params.get('start_date')
@@ -2562,19 +2573,7 @@ class PendingDuesReportView(generics.ListAPIView):
     def get_queryset(self):
         qs = RoomStayLogs.objects.filter(cancellations__isnull=True) \
             .select_related('room', 'group', 'checked_in_by', 'checked_out_by') \
-            .prefetch_related(
-                'group__customers__customer',
-                'amenities__amenity',
-                'payments__processed_by',
-                'payments__payment_method',
-                'nc_requests',
-                'food_orders__payment_method',
-                'food_orders__receipts',
-                'food_orders__ordered_by',
-                'notes__created_by',
-                'vehicles',
-                'cancellations__cancelled_by',
-            ) \
+            .prefetch_related(*STAY_LOG_PREFETCH) \
             .order_by('check_in')
 
         p = self.request.query_params

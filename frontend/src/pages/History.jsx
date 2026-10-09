@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import {
   Table, Button, Badge, Group, TextInput, Text, Stack, Skeleton,
-  Modal, Divider, SimpleGrid, Alert,
+  Modal, Divider, SimpleGrid, Alert, Pagination, Select,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { DatePickerInput } from '@mantine/dates';
 import { pdf } from '@react-pdf/renderer';
 import { IconSearch, IconFileText, IconEye, IconAlertTriangle } from '@tabler/icons-react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import { QUERY_KEYS_OPS, QUERY_KEYS, fetchStayHistory, fetchConfigurations, fetchRoomTypes, fetchRooms } from '../api/queries';
 import { parseConfigs, computeGst, stayGstPercent } from '../utils/configUtils';
@@ -414,18 +414,24 @@ export default function History() {
   const [dateRange, setDateRange] = useState([null, null]);
   const [appliedSearch, setAppliedSearch] = useState('');
   const [appliedRange, setAppliedRange] = useState([null, null]);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState('20');
   const [detailLog, setDetailLog] = useState(null);
   const [detailOpened, { open: openDetail, close: closeDetail }] = useDisclosure(false);
 
-  const params = {};
+  const params = { page, page_size: pageSize };
   if (appliedSearch) params.search = appliedSearch;
   if (appliedRange[0]) params.start_date = dayjs(appliedRange[0]).format('YYYY-MM-DD');
   if (appliedRange[1]) params.end_date = dayjs(appliedRange[1]).format('YYYY-MM-DD');
 
-  const { data: logs = [], isLoading } = useQuery({
+  const { data, isLoading, isFetching } = useQuery({
     queryKey: QUERY_KEYS_OPS.stayHistory(params),
     queryFn: () => fetchStayHistory(params),
+    placeholderData: keepPreviousData,
   });
+  const logs = data?.results ?? [];
+  const totalCount = data?.count ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalCount / Number(pageSize)));
 
   const { data: configs = [] } = useQuery({ queryKey: QUERY_KEYS.configurations, queryFn: fetchConfigurations });
   const configMap = parseConfigs(configs);
@@ -439,6 +445,7 @@ export default function History() {
   const applyFilters = () => {
     setAppliedSearch(search);
     setAppliedRange(dateRange);
+    setPage(1);
   };
 
   const handleKeyDown = (e) => {
@@ -540,6 +547,7 @@ export default function History() {
             setDateRange([null, null]);
             setAppliedSearch('');
             setAppliedRange([null, null]);
+            setPage(1);
           }}>
             Clear
           </Button>
@@ -580,6 +588,29 @@ export default function History() {
           </Table.Tbody>
         </Table>
       </Table.ScrollContainer>
+
+      {totalCount > 0 && (
+        <Group justify="space-between" wrap="wrap" gap="sm" style={{ opacity: isFetching ? 0.6 : 1 }}>
+          <Text size="sm" c="dimmed">
+            Showing {(page - 1) * Number(pageSize) + 1}–{Math.min(page * Number(pageSize), totalCount)} of {totalCount}
+          </Text>
+          <Group gap="sm">
+            <Select
+              size="xs"
+              w={110}
+              value={pageSize}
+              onChange={(v) => { setPageSize(v ?? '20'); setPage(1); }}
+              data={[
+                { value: '20', label: '20 / page' },
+                { value: '50', label: '50 / page' },
+                { value: '100', label: '100 / page' },
+              ]}
+              allowDeselect={false}
+            />
+            <Pagination size="sm" total={totalPages} value={page} onChange={setPage} />
+          </Group>
+        </Group>
+      )}
 
       <StayDetailModal
         log={detailLog}

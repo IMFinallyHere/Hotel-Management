@@ -405,7 +405,7 @@ class ActiveStayLogSerializer(StayLogSerializer):
                 'address': cg.customer.address,
                 'pincode': cg.customer.pincode,
             }
-            for cg in obj.group.customers.select_related('customer').all()
+            for cg in obj.group.customers.all()
         ]
 
     def get_amenities(self, obj):
@@ -420,7 +420,7 @@ class ActiveStayLogSerializer(StayLogSerializer):
                 'added_by_name': (sa.added_by.get_full_name() or sa.added_by.username) if sa.added_by else None,
                 'added_at': sa.added_at,
             }
-            for sa in obj.amenities.select_related('added_by').all()
+            for sa in obj.amenities.all()
         ]
 
     def get_payments(self, obj):
@@ -434,17 +434,18 @@ class ActiveStayLogSerializer(StayLogSerializer):
                 'note': p.note,
                 'created_on': p.created_on,
             }
-            for p in obj.payments.select_related('payment_method').all()
+            for p in obj.payments.all()
         ]
 
     def get_nc_status(self, obj):
-        latest = obj.nc_requests.order_by('-created_on').first()
+        # Pick from the prefetched rows in Python; order_by()/first() would re-query per stay
+        latest = max(obj.nc_requests.all(), key=lambda r: r.created_on, default=None)
         if not latest:
             return None
         return {'id': latest.id, 'status': latest.status, 'reason': latest.reason}
 
     def get_cancellation(self, obj):
-        c = obj.cancellations.first()
+        c = min(obj.cancellations.all(), key=lambda x: x.pk, default=None)
         if not c:
             return None
         return {
